@@ -80,7 +80,13 @@ pub fn run() {
             match modules::config::load_app_config() {
                 Ok(mut config) => {
                     // Hardened: Do NOT force LAN access in headless mode. Default to localhost for security.
-                    // config.proxy.allow_lan_access = true;
+                    // Requirement: explicit opt-in env var ALLOW_LAN=1 to bind 0.0.0.0
+                    if std::env::var("ALLOW_LAN").ok().as_deref() == Some("1") {
+                        config.proxy.allow_lan_access = true;
+                        info!("Headless mode with ALLOW_LAN=1: enabling 0.0.0.0 binding.");
+                    } else {
+                        info!("Headless mode: defaulting to localhost binding (secure). Set ALLOW_LAN=1 to bind 0.0.0.0.");
+                    }
 
                     // [NEW] 支持通过环境变量注入 API Key
                     // 优先级：ABV_API_KEY > API_KEY > 配置文件

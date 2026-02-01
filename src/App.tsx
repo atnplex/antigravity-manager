@@ -1,28 +1,28 @@
-import { createBrowserRouter, RouterProvider } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider } from "react-router-dom";
 
-import Layout from './components/layout/Layout';
-import Dashboard from './pages/Dashboard';
-import Accounts from './pages/Accounts';
-import Settings from './pages/Settings';
-import ApiProxy from './pages/ApiProxy';
-import Monitor from './pages/Monitor';
-import TokenStats from './pages/TokenStats';
-import Security from './pages/Security';
-import ThemeManager from './components/common/ThemeManager';
-import { UpdateNotification } from './components/UpdateNotification';
-import DebugConsole from './components/debug/DebugConsole';
-import { useEffect, useState } from 'react';
-import { useConfigStore } from './stores/useConfigStore';
-import { useAccountStore } from './stores/useAccountStore';
-import { useTranslation } from 'react-i18next';
-import { listen } from '@tauri-apps/api/event';
-import { isTauri } from './utils/env';
-import { request as invoke } from './utils/request';
-import { AdminAuthGuard } from './components/common/AdminAuthGuard';
+import Layout from "./components/layout/Layout";
+import Dashboard from "./pages/Dashboard";
+import Accounts from "./pages/Accounts";
+import Settings from "./pages/Settings";
+import ApiProxy from "./pages/ApiProxy";
+import Monitor from "./pages/Monitor";
+import TokenStats from "./pages/TokenStats";
+import Security from "./pages/Security";
+import ThemeManager from "./components/common/ThemeManager";
+import { UpdateNotification } from "./components/UpdateNotification";
+import DebugConsole from "./components/debug/DebugConsole";
+import { useEffect, useState } from "react";
+import { useConfigStore } from "./stores/useConfigStore";
+import { useAccountStore } from "./stores/useAccountStore";
+import { useTranslation } from "react-i18next";
+import { listen } from "@tauri-apps/api/event";
+import { isTauri } from "./utils/env";
+import { request as invoke } from "./utils/request";
+import { AdminAuthGuard } from "./components/common/AdminAuthGuard";
 
 const router = createBrowserRouter([
   {
-    path: '/',
+    path: "/",
     element: <Layout />,
     children: [
       {
@@ -30,27 +30,27 @@ const router = createBrowserRouter([
         element: <Dashboard />,
       },
       {
-        path: 'accounts',
+        path: "accounts",
         element: <Accounts />,
       },
       {
-        path: 'api-proxy',
+        path: "api-proxy",
         element: <ApiProxy />,
       },
       {
-        path: 'monitor',
+        path: "monitor",
         element: <Monitor />,
       },
       {
-        path: 'token-stats',
+        path: "token-stats",
         element: <TokenStats />,
       },
       {
-        path: 'security',
+        path: "security",
         element: <Security />,
       },
       {
-        path: 'settings',
+        path: "settings",
         element: <Settings />,
       },
     ],
@@ -71,10 +71,10 @@ function App() {
     if (config?.language) {
       i18n.changeLanguage(config.language);
       // Support RTL
-      if (config.language === 'ar') {
-        document.documentElement.dir = 'rtl';
+      if (config.language === "ar") {
+        document.documentElement.dir = "rtl";
       } else {
-        document.documentElement.dir = 'ltr';
+        document.documentElement.dir = "ltr";
       }
     }
   }, [config?.language, i18n]);
@@ -86,26 +86,26 @@ function App() {
 
     // 监听托盘切换账号事件
     unlistenPromises.push(
-      listen('tray://account-switched', () => {
-        console.log('[App] Tray account switched, refreshing...');
+      listen("tray://account-switched", () => {
+        console.log("[App] Tray account switched, refreshing...");
         fetchCurrentAccount();
         fetchAccounts();
-      })
+      }),
     );
 
     // 监听托盘刷新事件
     unlistenPromises.push(
-      listen('tray://refresh-current', () => {
-        console.log('[App] Tray refresh triggered, refreshing...');
+      listen("tray://refresh-current", () => {
+        console.log("[App] Tray refresh triggered, refreshing...");
         fetchCurrentAccount();
         fetchAccounts();
-      })
+      }),
     );
 
     // Cleanup
     return () => {
-      Promise.all(unlistenPromises).then(unlisteners => {
-        unlisteners.forEach(unlisten => unlisten());
+      Promise.all(unlistenPromises).then((unlisteners) => {
+        unlisteners.forEach((unlisten) => unlisten());
       });
     };
   }, [fetchCurrentAccount, fetchAccounts]);
@@ -114,7 +114,10 @@ function App() {
   const [showUpdateNotification, setShowUpdateNotification] = useState(false);
 
   // Check for updates on startup
+  // Check for updates on startup
   useEffect(() => {
+    // Hardened: Startup update check disabled.
+    /*
     const checkUpdates = async () => {
       try {
         console.log('[App] Checking if we should check for updates...');
@@ -136,6 +139,7 @@ function App() {
     // Delay check to avoid blocking initial render
     const timer = setTimeout(checkUpdates, 2000);
     return () => clearTimeout(timer);
+    */
   }, []);
 
   return (
