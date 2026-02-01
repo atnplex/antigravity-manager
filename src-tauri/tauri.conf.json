@@ -42,12 +42,10 @@
   },
   "plugins": {
     "updater": {
-      "active": true,
-      "endpoints": [
-        "https://github.com/lbjlaq/Antigravity-Manager/releases/latest/download/updater.json"
-      ],
-      "dialog": true,
-      "pubkey": "RWSQvAJOE+udAGSUoZB7Y7EhAGOyZkB1zHaKwRYfldgig5rIF+PVUDbo"
+      "active": false,
+      "endpoints": [],
+      "dialog": false,
+      "pubkey": ""
     },
     "process": null,
     "fs": null,
