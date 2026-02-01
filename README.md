@@ -4,7 +4,7 @@
 
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-blue?style=flat-square)
 ![Version](https://img.shields.io/badge/version-4.0.11--atnplex-orange?style=flat-square)
-![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
+![License](https://img.shields.io/badge/license-CC--BY--NC--SA--4.0-lightgrey?style=flat-square)
 
 **Professional AI Account & API Management**
 
@@ -287,9 +287,13 @@ docker exec -it antigravity-manager cat /root/.antigravity_tools/gui_config.json
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+**CC-BY-NC-SA-4.0** - see [LICENSE](LICENSE) for full terms.
 
-Forked from [lbjlaq/Antigravity-Manager](https://github.com/lbjlaq/Antigravity-Manager)
+This is a non-commercial fork maintained by ATNplex for internal use.
+
+**Original Project**: [lbjlaq/Antigravity-Manager](https://github.com/lbjlaq/Antigravity-Manager)
+**Original Author**: [lbjlaq](https://github.com/lbjlaq)
+**Modified by**: ATNplex
 
 ---
 
