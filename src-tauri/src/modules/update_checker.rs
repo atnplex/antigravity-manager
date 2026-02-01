@@ -48,56 +48,14 @@ struct GitHubRelease {
 
 /// Check for updates from GitHub releases
 pub async fn check_for_updates() -> Result<UpdateInfo, String> {
-    let client = reqwest::Client::builder()
-        .user_agent("Antigravity-Manager")
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| {
-            let err_msg = format!("Failed to create HTTP client: {}", e);
-            logger::log_error(&err_msg);
-            err_msg
-        })?;
-
-    logger::log_info("Checking for new version from GitHub...");
-
-    let response = client
-        .get(GITHUB_API_URL)
-        .send()
-        .await
-        .map_err(|e| {
-            let err_msg = format!("Failed to fetch release info: {}", e);
-            logger::log_error(&err_msg);
-            err_msg
-        })?;
-
-    if !response.status().is_success() {
-        return Err(format!("GitHub API returned status: {}", response.status()));
-    }
-
-    let release: GitHubRelease = response
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse release info: {}", e))?;
-
-    // Remove 'v' prefix if present
-    let latest_version = release.tag_name.trim_start_matches('v').to_string();
-    let current_version = CURRENT_VERSION.to_string();
-
-    let has_update = compare_versions(&latest_version, &current_version);
-
-    if has_update {
-        logger::log_info(&format!("New version found: {} (Current version: {})", latest_version, current_version));
-    } else {
-        logger::log_info(&format!("Already up to date: {} (Matches remote version {})", current_version, latest_version));
-    }
-
+    logger::log_info("Update check disabled (safe mode).");
     Ok(UpdateInfo {
-        current_version,
-        latest_version,
-        has_update,
-        download_url: release.html_url,
-        release_notes: release.body,
-        published_at: release.published_at,
+        current_version: CURRENT_VERSION.to_string(),
+        latest_version: CURRENT_VERSION.to_string(),
+        has_update: false,
+        download_url: "".to_string(),
+        release_notes: "Updates are disabled in this environment.".to_string(),
+        published_at: "".to_string(),
     })
 }
 
