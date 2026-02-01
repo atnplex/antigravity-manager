@@ -1821,7 +1821,8 @@ async fn admin_check_for_updates() -> Result<impl IntoResponse, (StatusCode, Jso
         latest_version: crate::constants::FALLBACK_VERSION.to_string(),
         current_version: crate::constants::FALLBACK_VERSION.to_string(),
         download_url: "".to_string(),
-        release_notes: None,
+        release_notes: "".to_string(),
+        published_at: "".to_string(),
     };
     Ok(Json(info))
 }
