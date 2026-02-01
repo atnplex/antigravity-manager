@@ -8,7 +8,7 @@ const VERSION_URL: &str = "https://antigravity-auto-updater-974169037036.us-cent
 const CHANGELOG_URL: &str = "https://antigravity.google/changelog";
 
 /// Fallback version derived from Cargo.toml at compile time
-const FALLBACK_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const FALLBACK_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Pre-compiled regex for version parsing (X.Y.Z pattern)
 static VERSION_REGEX: LazyLock<Regex> = LazyLock::new(|| {
