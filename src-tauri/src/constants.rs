@@ -31,17 +31,7 @@ enum VersionSource {
 
 /// Fetch version from remote API or Changelog website
 fn fetch_remote_version() -> (String, VersionSource) {
-    // 1. Try Version API (Fastest)
-    if let Some(v) = try_fetch_version(VERSION_URL, "version-api-fetch") {
-        return (v, VersionSource::RemoteAPI);
-    }
-
-    // 2. Try Scraping Changelog (Fallback)
-    if let Some(v) = try_fetch_version(CHANGELOG_URL, "changelog-scrape") {
-        return (v, VersionSource::ChangelogWeb);
-    }
-
-    // 3. Fallback: Cargo.toml version (always valid at compile time)
+    // Hardened: Skip remote checks to prevent outbound network calls.
     (FALLBACK_VERSION.to_string(), VersionSource::CargoToml)
 }
 
@@ -57,14 +47,14 @@ fn try_fetch_version(url: &'static str, thread_name: &str) -> Option<String> {
 
             let response = client.get(url).send().ok()?;
             let text = response.text().ok()?;
-            
+
             // For changelog, restrict scan to first 5000 chars for efficiency
             let scan_text = if url == CHANGELOG_URL && text.len() > 5000 {
                 &text[..5000]
             } else {
                 &text
             };
-            
+
             parse_version(scan_text)
         });
 
