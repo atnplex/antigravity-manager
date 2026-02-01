@@ -51,3 +51,28 @@
 - [ ] Run `npm install` to clean up dependencies.
 - [ ] Run `npm run tauri build` (or backend check) to ensure no compilation errors.
 - [ ] Verify functionality (smoke test).
+
+### Phase D: Tooling & Verification
+
+**Build Verification failed locally** because `npm` and `cargo` are missing from PATH.
+
+**To verify this build, please install:**
+
+1. **Node.js**: `winget install OpenJS.NodeJS` (Restart terminal after install).
+2. **Rust**: `winget install Rustlang.Rustup` then run `rustup-init.exe` (Default install is fine).
+
+**Then run:**
+
+```powershell
+npm install
+cd src-tauri
+cargo check
+```
+
+## SECURITY NOTE
+
+> [!IMPORTANT]
+> **NEVER Commit Secrets.**
+> The application state and config are stored in `.antigravity_tools` (home dir) or `data/` (portable).
+> These paths have been added to `.gitignore`.
+> Always use Environment Variables (`API_KEY`, `WEB_PASSWORD`) for local testing.
