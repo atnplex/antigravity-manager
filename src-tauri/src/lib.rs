@@ -79,8 +79,8 @@ pub fn run() {
             // Load config
             match modules::config::load_app_config() {
                 Ok(mut config) => {
-                    // Force LAN access in headless/docker mode so it binds to 0.0.0.0
-                    config.proxy.allow_lan_access = true;
+                    // Hardened: Do NOT force LAN access in headless mode. Default to localhost for security.
+                    // config.proxy.allow_lan_access = true;
 
                     // [NEW] 支持通过环境变量注入 API Key
                     // 优先级：ABV_API_KEY > API_KEY > 配置文件
