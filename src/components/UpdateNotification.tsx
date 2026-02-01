@@ -166,14 +166,9 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
 
           {updateState === "downloading" && (
             <div className="mb-4">
-              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                <div
-                  className="bg-gradient-to-r from-blue-500 to-purple-600 h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${downloadProgress}%` }}
-                />
-              </div>
-              <p className="text-xs text-gray-500 mt-1 text-center">
-                {downloadProgress}%
+              {/* Hardened: Download progress UI removed */}
+              <p className="text-sm text-gray-500 text-center">
+                Downloading...
               </p>
             </div>
           )}
