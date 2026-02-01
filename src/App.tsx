@@ -16,8 +16,8 @@ import { useConfigStore } from "./stores/useConfigStore";
 import { useAccountStore } from "./stores/useAccountStore";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
-import { isTauri } from "./utils/env";
-import { request as invoke } from "./utils/request";
+// import { isTauri } from "./utils/env";
+// import { request as invoke } from "./utils/request";
 import { AdminAuthGuard } from "./components/common/AdminAuthGuard";
 
 const router = createBrowserRouter([

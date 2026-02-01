@@ -7,13 +7,13 @@ import {
   Loader2,
   CheckCircle,
 } from "lucide-react";
-import { request as invoke } from "../utils/request";
+// import { request as invoke } from "../utils/request";
 import { useTranslation } from "react-i18next";
 // Hardened: Removed updater plugin imports
 // import { check as tauriCheck } from '@tauri-apps/plugin-updater';
 // import { relaunch as tauriRelaunch } from '@tauri-apps/plugin-process';
-import { isTauri } from "../utils/env";
-import { showToast } from "./common/ToastContainer";
+// import { isTauri } from "../utils/env";
+// import { showToast } from "./common/ToastContainer";
 
 interface UpdateInfo {
   has_update: boolean;
@@ -36,7 +36,7 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
   const [isVisible, setIsVisible] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const [updateState, setUpdateState] = useState<UpdateState>("checking");
-  const [downloadProgress, setDownloadProgress] = useState(0);
+  // const [downloadProgress, setDownloadProgress] = useState(0);
 
   useEffect(() => {
     checkForUpdates();
@@ -44,7 +44,14 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
 
   const checkForUpdates = async () => {
     try {
-      const info = await invoke<UpdateInfo>("check_for_updates");
+      // Mocked for hardening
+      const info = {
+        has_update: false,
+        latest_version: "0.0.0",
+        current_version: "0.0.0",
+        download_url: "",
+      };
+      // const info = await invoke<UpdateInfo>("check_for_updates");
       if (info.has_update) {
         setUpdateInfo(info);
         setUpdateState("available");
