@@ -33,6 +33,8 @@ src-tauri/.env
 # Environment
 .env
 .env.*
+!.env.example
+docker/.env
 environment/
 
 # Python virtual environments and test files
