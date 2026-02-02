@@ -11,8 +11,13 @@ pub mod autostart;
 pub mod cloudflared;
 // 导出 security 命令 (IP 监控)
 pub mod security;
+<<<<<<< HEAD
 // 导出 workflows 命令 (slash commands)
 pub mod workflows;
+=======
+// 导出 skills 命令 (BM25 router)
+pub mod skills;
+>>>>>>> task/2026-02-01/integrate-skill-router
 
 /// 列出所有账号
 #[tauri::command]

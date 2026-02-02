@@ -19,10 +19,10 @@ fn increase_nofile_limit() {
             rlim_cur: 0,
             rlim_max: 0,
         };
-        
+
         if libc::getrlimit(libc::RLIMIT_NOFILE, &mut rl) == 0 {
             info!("Current open file limit: soft={}, hard={}", rl.rlim_cur, rl.rlim_max);
-            
+
             // Attempt to increase to 4096 or maximum hard limit
             let target = 4096.min(rl.rlim_max);
             if rl.rlim_cur < target {
@@ -66,10 +66,10 @@ pub fn run() {
         error!("Failed to initialize security database: {}", e);
     }
 
-    
+
     if is_headless {
         info!("Starting in HEADLESS mode...");
-        
+
         let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
         rt.block_on(async {
             // Initialize states manually
@@ -100,7 +100,7 @@ pub fn run() {
                     let env_web_password = std::env::var("ABV_WEB_PASSWORD")
                         .or_else(|_| std::env::var("WEB_PASSWORD"))
                         .ok();
-                    
+
                     if let Some(pwd) = env_web_password {
                         if !pwd.trim().is_empty() {
                             info!("Using Web UI Password from environment variable");
@@ -113,7 +113,7 @@ pub fn run() {
                     let env_auth_mode = std::env::var("ABV_AUTH_MODE")
                         .or_else(|_| std::env::var("AUTH_MODE"))
                         .ok();
-                    
+
                     if let Some(mode_str) = env_auth_mode {
                         let mode = match mode_str.to_lowercase().as_str() {
                             "off" => Some(crate::proxy::ProxyAuthMode::Off),
@@ -143,7 +143,7 @@ pub fn run() {
                     info!("💡 Tips: You can use these keys to login to Web UI and access AI APIs.");
                     info!("💡 Search docker logs or grep gui_config.json to find them.");
                     info!("--------------------------------------------------");
-                    
+
                     // Start proxy service
                     if let Err(e) = commands::proxy::internal_start_proxy_service(
                         config.proxy,
@@ -154,9 +154,9 @@ pub fn run() {
                         error!("Failed to start proxy service in headless mode: {}", e);
                         std::process::exit(1);
                     }
-                    
+
                     info!("Headless proxy service is running.");
-                    
+
                     // Start smart scheduler
                     modules::scheduler::start_scheduler(None, proxy_state.clone());
                     info!("Smart scheduler started in headless mode.");
@@ -166,7 +166,7 @@ pub fn run() {
                     std::process::exit(1);
                 }
             }
-            
+
             // Wait for Ctrl-C
             tokio::signal::ctrl_c().await.ok();
             info!("Headless mode shutting down");
@@ -226,7 +226,7 @@ pub fn run() {
 
             modules::tray::create_tray(app.handle())?;
             info!("Tray created");
-            
+
             // 立即启动管理服务器 (8045)，以便 Web 端能访问
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -235,7 +235,7 @@ pub fn run() {
                     let state = handle.state::<commands::proxy::ProxyServiceState>();
                     let cf_state = handle.state::<commands::cloudflared::CloudflaredState>();
                     let integration = crate::modules::integration::SystemManager::Desktop(handle.clone());
-                    
+
                     // 1. 确保管理后台开启
                     if let Err(e) = commands::proxy::ensure_admin_server(
                         config.proxy.clone(),
@@ -263,14 +263,14 @@ pub fn run() {
                     }
                 }
             });
-            
+
             // Start smart scheduler
             let scheduler_state = app.handle().state::<commands::proxy::ProxyServiceState>();
             modules::scheduler::start_scheduler(Some(app.handle().clone()), scheduler_state.inner().clone());
-            
+
             // [PHASE 1] 已整合至 Axum 端口 (8045)，不再单独启动 19527 端口
             info!("Management API integrated into main proxy server (port 8045)");
-            
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -407,6 +407,10 @@ pub fn run() {
             commands::security::check_ip_in_whitelist,
             commands::security::get_security_config,
             commands::security::update_security_config,
+            // Skills router commands
+            commands::skills::select_skills,
+            commands::skills::load_skill_content,
+            commands::skills::get_skill_stats,
             // Cloudflared commands
             commands::cloudflared::cloudflared_check,
             commands::cloudflared::cloudflared_install,
