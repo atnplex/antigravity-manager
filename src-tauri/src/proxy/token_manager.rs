@@ -228,9 +228,9 @@ impl TokenManager {
                 .get("validation_blocked_until")
                 .and_then(|v| v.as_i64())
                 .unwrap_or(0);
-            
+
             let now = chrono::Utc::now().timestamp();
-            
+
             if now < block_until {
                 // Still blocked
                 tracing::debug!(
@@ -252,7 +252,7 @@ impl TokenManager {
                 account["validation_blocked"] = serde_json::Value::Bool(false);
                 account["validation_blocked_until"] = serde_json::Value::Null;
                 account["validation_blocked_reason"] = serde_json::Value::Null;
-                
+
                 // Save cleared state
                 if let Ok(json_str) = serde_json::to_string_pretty(&account) {
                     let _ = std::fs::write(path, json_str);
@@ -839,7 +839,11 @@ impl TokenManager {
                                 let _ = self.save_project_id(&token.account_id, &pid).await;
                                 pid
                             }
-                            Err(_) => "bamboo-precept-lgxtn".to_string(), // fallback
+                            Err(_) => {
+                                let mock = crate::proxy::project_resolver::generate_mock_project_id();
+                                tracing::warn!("⚠️  Auto-fallback: Project resolution failed for {}, using proxy mock ID: {}", token.email, mock);
+                                mock
+                            }
                         }
                     };
 
@@ -2025,30 +2029,30 @@ impl TokenManager {
 
         let content = std::fs::read_to_string(&path)
              .map_err(|e| format!("Failed to read account file: {}", e))?;
-        
+
         let mut account: serde_json::Value = serde_json::from_str(&content)
              .map_err(|e| format!("Failed to parse account JSON: {}", e))?;
-        
+
         account["validation_blocked"] = serde_json::Value::Bool(true);
         account["validation_blocked_until"] = serde_json::Value::Number(serde_json::Number::from(block_until));
         account["validation_blocked_reason"] = serde_json::Value::String(reason.to_string());
-        
+
         // Clear sticky session if blocked
         self.session_accounts.retain(|_, v| *v != account_id);
 
         let json_str = serde_json::to_string_pretty(&account)
              .map_err(|e| format!("Failed to serialize account JSON: {}", e))?;
-             
+
         std::fs::write(&path, json_str)
              .map_err(|e| format!("Failed to write account file: {}", e))?;
-             
+
         tracing::info!(
-             "🚫 Account {} validation blocked until {} (reason: {})", 
-             account_id, 
+             "🚫 Account {} validation blocked until {} (reason: {})",
+             account_id,
              block_until,
              reason
         );
-        
+
         Ok(())
     }
 
