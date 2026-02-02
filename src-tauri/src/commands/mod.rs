@@ -11,6 +11,8 @@ pub mod autostart;
 pub mod cloudflared;
 // 导出 security 命令 (IP 监控)
 pub mod security;
+// 导出 workflows 命令 (slash commands)
+pub mod workflows;
 
 /// 列出所有账号
 #[tauri::command]
@@ -114,15 +116,15 @@ pub async fn switch_account(
     let service = modules::account_service::AccountService::new(
         crate::modules::integration::SystemManager::Desktop(app.clone())
     );
-    
+
     service.switch_account(&account_id).await?;
-    
+
     // 同步托盘
     crate::modules::tray::update_tray_menus(&app);
 
     // [FIX #820] Notify proxy to clear stale session bindings and reload accounts
     let _ = crate::commands::proxy::reload_proxy_accounts(proxy_state).await;
-    
+
     Ok(())
 }
 
