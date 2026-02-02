@@ -32,6 +32,7 @@ save_credential() {
         echo "$value" | secret-tool store --label="$key" service "$KEYRING_SERVICE" key "$key" 2>/dev/null || {
             echo -e "${YELLOW}⚠ Keyring not available, saving to .env (less secure)${NC}"
             echo "$key=$value" >> "$ENV_FILE"
+            chmod 600 "$ENV_FILE"
         }
     else
         # Fallback to .env file

@@ -173,7 +173,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { code } = args;
 
       try {
-        const { stdout, stderr } = await execAsync(
+        const { stdout } = await execAsync(
           `echo ${JSON.stringify(code)} | shellcheck -`,
         );
 
