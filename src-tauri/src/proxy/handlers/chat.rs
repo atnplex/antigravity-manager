@@ -13,6 +13,10 @@ use tracing::{debug, error, info, warn};
 
 use crate::proxy::server::AppState;
 use crate::commands::skills::{select_skills, load_skill_content};
+use crate::commands::workflows::{
+    parse_workflow_command, validate_widget_workflow, filter_skills_for_widget, WorkflowCommand
+};
+use crate::workflows::{plan, debug as debug_flow, TaskResult};
 
 // Client -> Server messages
 #[derive(Debug, Deserialize)]
@@ -250,8 +254,20 @@ async fn handle_client_message(
         ClientMessage::UserMessage { session_id, content } => {
             info!("User message in session {}: {}", session_id, content);
 
-            // Phase 4: Skills Integration Pipeline
-            // Step 1: Send status update
+            // Phase 5.1: Workflow Parsing & Widget Security
+
+            // 1. Parse workflow command (server-side only)
+            let workflow = parse_workflow_command(&content);
+            if let Some(cmd) = &workflow {
+                info!("Detected workflow command: {:?}", cmd);
+            }
+
+            // 2. Security Check: Widget Mode Constraints
+            if let Err(msg) = validate_widget_workflow(&session_id, &workflow) {
+                return ServerMessage::Error { message: msg };
+            }
+
+            // 3. Send status update
             send_status_update(
                 sender,
                 session_id.clone(),
@@ -259,8 +275,8 @@ async fn handle_client_message(
                 "Analyzing request and selecting relevant skills...".to_string(),
             ).await;
 
-            // Step 2: Select skills using BM25 router
-            let selection_result = match select_skills(content.clone(), Some(8), Some(80000)).await {
+            // 4. Select skills using BM25 router
+            let mut selection_result = match select_skills(content.clone(), Some(8), Some(80000)).await {
                 Ok(selection) => selection,
                 Err(e) => {
                     error!("Failed to select skills: {}", e);
@@ -270,6 +286,25 @@ async fn handle_client_message(
                 }
             };
 
+            // 5. Apply Workflow Overrides & Widget Limits
+            if let Some(cmd) = &workflow {
+                // Force persona based on workflow
+                selection_result.persona = cmd.get_persona().to_string();
+            }
+
+            // Apply Widget allowed skills + count limit
+            let skill_ids_ref = &mut selection_result.skills.iter_mut().map(|s| s.id.clone()).collect::<Vec<_>>();
+            // Note: filter_skills_for_widget modifies a Vec<String>, we have Vec<Skill>.
+            // We need to filter the skills vector directly.
+
+            // Security: Enforce widget allowlist and max count
+            use crate::commands::workflows::is_widget_mode;
+            if is_widget_mode(&session_id) {
+                let allowed = crate::commands::workflows::get_widget_allowed_skills();
+                selection_result.skills.retain(|s| allowed.contains(&s.id));
+                selection_result.skills.truncate(crate::commands::workflows::WIDGET_MAX_SKILLS);
+            }
+
             info!(
                 "Selected persona: {}, {} skills, {} bytes",
                 selection_result.persona,
@@ -277,7 +312,7 @@ async fn handle_client_message(
                 selection_result.total_bytes
             );
 
-            // Step 3: Notify client of selected skills
+            // 6. Notify client of selected skills (with forced persona)
             let skill_summaries: Vec<SkillSummary> = selection_result.skills.iter()
                 .map(|s| SkillSummary {
                     id: s.id.clone(),
@@ -298,7 +333,7 @@ async fn handle_client_message(
                 let _ = sender.send(Message::Text(text)).await;
             }
 
-            // Step 4: Load skill content (optional - for future LLM integration)
+            // 7. Load skill content
             let skill_ids: Vec<String> = selection_result.skills.iter()
                 .map(|s| s.id.clone())
                 .collect();
@@ -310,56 +345,74 @@ async fn handle_client_message(
                 "Loading selected skill content...".to_string(),
             ).await;
 
-            let skill_contents = match load_skill_content(skill_ids).await {
+            let _skill_contents = match load_skill_content(skill_ids).await {
                 Ok(contents) => contents,
                 Err(e) => {
                     warn!("Failed to load skill content: {}", e);
-                    // Continue anyway with mock response
                     std::collections::HashMap::new()
                 }
             };
 
-            debug!("Loaded {} skill files", skill_contents.len());
-
-            // Step 5: TODO: Integrate with LLM
-            // - Build prompt with persona system message
-            // - Inject skill SKILL.md content
-            // - Send to Gemini/Claude
-            // - Stream response back to client
-
+            // 8. Execute Workflow Logic
             send_status_update(
                 sender,
                 session_id.clone(),
                 "processing".to_string(),
                 format!(
-                    "Processing as {} with {} skills loaded ({} KB)...",
-                    selection_result.persona,
-                    skill_summaries.len(),
-                    selection_result.total_bytes / 1024
+                    "Executing {} workflow as {}...",
+                    workflow.as_ref().map(|w| w.get_description()).unwrap_or("standard"),
+                    selection_result.persona
                 ),
             ).await;
 
-            // For now, return mock response with skill info
-            let response_content = format!(
-                "🤖 **Persona:** {}\n📂 **Category:** {}\n📚 **Skills:** {}\n💾 **Content:** {} KB loaded\n\n🔨 **Next Steps:**\n- TODO: Integrate with LLM API\n- TODO: Create git worktree\n- TODO: Execute task pipeline\n- TODO: Open PR\n\n_Your message: {}_",
-                selection_result.persona,
-                selection_result.category,
-                skill_summaries.iter()
-                    .map(|s| format!("{} ({:.1})", s.name, s.score))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                selection_result.total_bytes / 1024,
-                content
-            );
+            let exec_result = match workflow {
+                Some(WorkflowCommand::Plan) => plan::execute(content.clone(), &selection_result).await,
+                Some(WorkflowCommand::Debug) => debug_flow::execute(content.clone(), &selection_result).await,
+                _ => {
+                    // Standard flow (echo/mock for now)
+                    Ok(TaskResult::Completed {
+                        summary: format!(
+                            "Standard response (Persona: {}). Skills: {}",
+                            selection_result.persona,
+                            skill_summaries.len()
+                        )
+                    })
+                }
+            };
 
-            ServerMessage::MessageAppended {
-                session_id,
-                message: TaskMessageResponse {
-                    id: chrono::Utc::now().timestamp(),
-                    role: "assistant".to_string(),
-                    content: response_content,
-                    created_at: chrono::Utc::now().timestamp(),
+            match exec_result {
+                Ok(task_result) => {
+                    let response_content = match task_result {
+                        TaskResult::RequiresReview { artifact, next_step } => {
+                            format!(
+                                "📝 **Plan Created:** `{}`\n\n👉 **Next Step:** {}\n\n_Review the artifact to proceed._",
+                                artifact, next_step
+                            )
+                        },
+                        TaskResult::DebugDiagnosis { root_cause, proposed_fix, confidence } => {
+                            format!(
+                                "🔍 **Diagnosis:** {}\n\n🛠️ **Proposed Fix:** {}\n\n✅ **Confidence:** {:.0}%",
+                                root_cause, proposed_fix, confidence * 100.0
+                            )
+                        },
+                        TaskResult::Completed { summary } => {
+                            format!("✅ **Done:** {}\n\n_Your message: {}_", summary, content)
+                        }
+                    };
+
+                    ServerMessage::MessageAppended {
+                        session_id,
+                        message: TaskMessageResponse {
+                            id: chrono::Utc::now().timestamp(),
+                            role: "assistant".to_string(),
+                            content: response_content,
+                            created_at: chrono::Utc::now().timestamp(),
+                        },
+                    }
                 },
+                Err(e) => ServerMessage::Error {
+                    message: format!("Workflow execution failed: {}", e)
+                }
             }
         }
     }
