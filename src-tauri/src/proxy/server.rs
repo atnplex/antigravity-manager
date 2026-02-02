@@ -2,7 +2,7 @@ use crate::models::AppConfig;
 use crate::modules::{account, config, logger, migration, proxy_db, token_stats};
 use crate::proxy::TokenManager;
 use axum::{
-    extract::{DefaultBodyLimit, Path, Query, State},
+    extract::{DefaultBodyLimit, Path, Query, State, ws::{WebSocket, WebSocketUpgrade, Message}},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Json, Response},
     routing::{any, delete, get, post},
@@ -541,6 +541,8 @@ impl AxumServer {
             )
             .route("/system/antigravity/path", get(admin_get_antigravity_path))
             .route("/system/antigravity/args", get(admin_get_antigravity_args))
+            // WebSocket endpoints
+            .route("/ws/realtime", get(ws_handler))
             // OAuth (Web) - Admin 接口
             .route("/auth/url", get(admin_prepare_oauth_url_web))
             // 应用管理特定鉴权层 (强制校验)
@@ -619,7 +621,7 @@ impl AxumServer {
                         match res {
                             Ok((stream, remote_addr)) => {
                                 let io = TokioIo::new(stream);
-                                
+
                                 // 注入 ConnectInfo (用于获取真实 IP)
                                 use tower::ServiceExt;
                                 use hyper::body::Incoming;
@@ -2562,7 +2564,7 @@ async fn handle_oauth_callback(
                         <div class="icon">✅</div>
                         <h1>Authorization Successful</h1>
                         <p>You can close this window now. The application should refresh automatically.</p>
-                        
+
                         <div class="fallback-box">
                             <span class="fallback-title">💡 Did it not refresh?</span>
                             <span class="fallback-text">If the application is running in a container or remote environment, you may need to manually copy the link below:</span>
@@ -2709,5 +2711,34 @@ fn get_oauth_redirect_uri(port: u16, _host: Option<&str>, _proto: Option<&str>) 
     } else {
         // 强制返回 localhost。远程部署时，用户可通过回填功能完成授权。
         format!("http://localhost:{}/auth/callback", port)
+    }
+}
+
+// ============================================================================
+// WebSocket Handlers for Real-time Stats
+// ============================================================================
+
+/// WebSocket handler for real-time stats streaming
+pub async fn ws_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+) -> Response {
+    ws.on_upgrade(move |socket| handle_socket(socket, state))
+}
+
+async fn handle_socket(mut socket: WebSocket, state: AppState) {
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+    loop {
+        interval.tick().await;
+        let stats = state.monitor.get_stats().await;
+        if socket
+            .send(Message::Text(
+                serde_json::to_string(&stats).unwrap_or_else(|_| "{}".to_string()),
+            ))
+            .await
+            .is_err()
+        {
+            break;
+        }
     }
 }
