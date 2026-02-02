@@ -1,4 +1,4 @@
-// Chat WebSocket handler for Control Plane
+// Chat WebSocket handler for Control Plane with Skills Integration
 use axum::{
     extract::{
         ws::{Message, WebSocket},
@@ -9,15 +9,16 @@ use axum::{
 use futures::{sink::SinkExt, stream::StreamExt};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::proxy::server::AppState;
+use crate::commands::skills::{select_skills, load_skill_content};
 
 // Client -> Server messages
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ClientMessage {
-   CreateSession {
+    CreateSession {
         title: String,
         repo: String,
         branch: Option<String>,
@@ -47,6 +48,20 @@ enum ServerMessage {
         session_id: String,
         message: TaskMessageResponse,
     },
+    /// Skills selected for this request
+    SkillsSelected {
+        session_id: String,
+        persona: String,
+        category: String,
+        skills: Vec<SkillSummary>,
+        total_bytes: usize,
+    },
+    /// Status update during task processing
+    TaskStatus {
+        session_id: String,
+        status: String,
+        details: String,
+    },
     Error {
         message: String,
     },
@@ -68,6 +83,13 @@ struct TaskMessageResponse {
     role: String,
     content: String,
     created_at: i64,
+}
+
+#[derive(Debug, Serialize, Clone)]
+struct SkillSummary {
+    id: String,
+    name: String,
+    score: f64,
 }
 
 /// WebSocket handler endpoint
@@ -101,7 +123,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
             debug!("Received WebSocket message: {}", text);
 
             let response = match serde_json::from_str::<ClientMessage>(&text) {
-                Ok(client_msg) => handle_client_message(client_msg, &state).await,
+                Ok(client_msg) => handle_client_message(client_msg, &state, &mut sender).await,
                 Err(e) => ServerMessage::Error {
                     message: format!("Invalid message format: {}", e),
                 },
@@ -128,8 +150,30 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     info!("Chat WebSocket disconnected");
 }
 
+/// Send a status update message to client
+async fn send_status_update(
+    sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+    session_id: String,
+    status: String,
+    details: String,
+) {
+    let msg = ServerMessage::TaskStatus {
+        session_id,
+        status,
+        details,
+    };
+
+    if let Ok(text) = serde_json::to_string(&msg) {
+        let _ = sender.send(Message::Text(text)).await;
+    }
+}
+
 /// Process client messages and return server responses
-async fn handle_client_message(msg: ClientMessage, _state: &AppState) -> ServerMessage {
+async fn handle_client_message(
+    msg: ClientMessage,
+    _state: &AppState,
+    sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+) -> ServerMessage {
     match msg {
         ClientMessage::CreateSession { title, repo, branch } => {
             // TODO: Create session in database
@@ -204,16 +248,116 @@ async fn handle_client_message(msg: ClientMessage, _state: &AppState) -> ServerM
             }
         }
         ClientMessage::UserMessage { session_id, content } => {
-            // TODO: Save message to database and trigger agent processing
             info!("User message in session {}: {}", session_id, content);
 
-            // Mock echo response
-            ServerMessage::MessageAppended {
+            // Phase 4: Skills Integration Pipeline
+            // Step 1: Send status update
+            send_status_update(
+                sender,
+                session_id.clone(),
+                "selecting_skills".to_string(),
+                "Analyzing request and selecting relevant skills...".to_string(),
+            ).await;
+
+            // Step 2: Select skills using BM25 router
+            let selection_result = match select_skills(content.clone(), Some(8), Some(80000)).await {
+                Ok(selection) => selection,
+                Err(e) => {
+                    error!("Failed to select skills: {}", e);
+                    return ServerMessage::Error {
+                        message: format!("Skill selection failed: {}", e),
+                    };
+                }
+            };
+
+            info!(
+                "Selected persona: {}, {} skills, {} bytes",
+                selection_result.persona,
+                selection_result.skills.len(),
+                selection_result.total_bytes
+            );
+
+            // Step 3: Notify client of selected skills
+            let skill_summaries: Vec<SkillSummary> = selection_result.skills.iter()
+                .map(|s| SkillSummary {
+                    id: s.id.clone(),
+                    name: s.name.clone(),
+                    score: s.score,
+                })
+                .collect();
+
+            let skills_msg = ServerMessage::SkillsSelected {
                 session_id: session_id.clone(),
+                persona: selection_result.persona.clone(),
+                category: selection_result.category.clone(),
+                skills: skill_summaries.clone(),
+                total_bytes: selection_result.total_bytes,
+            };
+
+            if let Ok(text) = serde_json::to_string(&skills_msg) {
+                let _ = sender.send(Message::Text(text)).await;
+            }
+
+            // Step 4: Load skill content (optional - for future LLM integration)
+            let skill_ids: Vec<String> = selection_result.skills.iter()
+                .map(|s| s.id.clone())
+                .collect();
+
+            send_status_update(
+                sender,
+                session_id.clone(),
+                "loading_skills".to_string(),
+                "Loading selected skill content...".to_string(),
+            ).await;
+
+            let skill_contents = match load_skill_content(skill_ids).await {
+                Ok(contents) => contents,
+                Err(e) => {
+                    warn!("Failed to load skill content: {}", e);
+                    // Continue anyway with mock response
+                    std::collections::HashMap::new()
+                }
+            };
+
+            debug!("Loaded {} skill files", skill_contents.len());
+
+            // Step 5: TODO: Integrate with LLM
+            // - Build prompt with persona system message
+            // - Inject skill SKILL.md content
+            // - Send to Gemini/Claude
+            // - Stream response back to client
+
+            send_status_update(
+                sender,
+                session_id.clone(),
+                "processing".to_string(),
+                format!(
+                    "Processing as {} with {} skills loaded ({} KB)...",
+                    selection_result.persona,
+                    skill_summaries.len(),
+                    selection_result.total_bytes / 1024
+                ),
+            ).await;
+
+            // For now, return mock response with skill info
+            let response_content = format!(
+                "🤖 **Persona:** {}\n📂 **Category:** {}\n📚 **Skills:** {}\n💾 **Content:** {} KB loaded\n\n🔨 **Next Steps:**\n- TODO: Integrate with LLM API\n- TODO: Create git worktree\n- TODO: Execute task pipeline\n- TODO: Open PR\n\n_Your message: {}_",
+                selection_result.persona,
+                selection_result.category,
+                skill_summaries.iter()
+                    .map(|s| format!("{} ({:.1})", s.name, s.score))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                selection_result.total_bytes / 1024,
+                content
+            );
+
+            ServerMessage::MessageAppended {
+                session_id,
                 message: TaskMessageResponse {
                     id: chrono::Utc::now().timestamp(),
                     role: "assistant".to_string(),
-                    content: format!("Echo: {} (Backend WebSocket is working!)", content),
+                    content: response_content,
                     created_at: chrono::Utc::now().timestamp(),
                 },
             }
