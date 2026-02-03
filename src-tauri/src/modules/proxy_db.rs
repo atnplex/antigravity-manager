@@ -19,6 +19,9 @@ fn connect_db() -> Result<Connection, String> {
     
     // Synchronous NORMAL is faster and safe enough for WAL
     conn.pragma_update(None, "synchronous", "NORMAL").map_err(|e| e.to_string())?;
+
+    // Enable foreign keys
+    conn.pragma_update(None, "foreign_keys", "ON").map_err(|e| e.to_string())?;
     
     Ok(conn)
 }
@@ -37,6 +40,31 @@ pub fn init_db() -> Result<(), String> {
             duration INTEGER,
             model TEXT,
             error TEXT
+        )",
+        [],
+    ).map_err(|e| e.to_string())?;
+
+    // Create tasks/sessions tables
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS task_sessions (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            repo_name TEXT NOT NULL,
+            branch_name TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at INTEGER NOT NULL
+        )",
+        [],
+    ).map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS task_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY(session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
         )",
         [],
     ).map_err(|e| e.to_string())?;
@@ -479,3 +507,129 @@ pub fn get_token_usage_by_ip(limit: usize, hours: i64) -> Result<Vec<IpTokenStat
     Ok(stats)
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TaskSession {
+    pub id: String,
+    pub title: String,
+    pub repo_name: String,
+    pub branch_name: Option<String>,
+    pub status: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TaskMessage {
+    pub id: i64,
+    pub session_id: String,
+    pub role: String,
+    pub content: String,
+    pub created_at: i64,
+}
+
+pub fn create_session(title: String, repo: String, branch: Option<String>) -> Result<TaskSession, String> {
+    let conn = connect_db()?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let created_at = chrono::Utc::now().timestamp();
+    let status = "pending";
+
+    conn.execute(
+        "INSERT INTO task_sessions (id, title, repo_name, branch_name, status, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![id, title, repo, branch, status, created_at],
+    ).map_err(|e| e.to_string())?;
+
+    Ok(TaskSession {
+        id,
+        title,
+        repo_name: repo,
+        branch_name: branch,
+        status: status.to_string(),
+        created_at,
+    })
+}
+
+pub fn list_sessions() -> Result<Vec<TaskSession>, String> {
+    let conn = connect_db()?;
+    let mut stmt = conn.prepare(
+        "SELECT id, title, repo_name, branch_name, status, created_at FROM task_sessions ORDER BY created_at DESC"
+    ).map_err(|e| e.to_string())?;
+
+    let sessions_iter = stmt.query_map([], |row| {
+        Ok(TaskSession {
+            id: row.get(0)?,
+            title: row.get(1)?,
+            repo_name: row.get(2)?,
+            branch_name: row.get(3)?,
+            status: row.get(4)?,
+            created_at: row.get(5)?,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut sessions = Vec::new();
+    for session in sessions_iter {
+        sessions.push(session.map_err(|e| e.to_string())?);
+    }
+    Ok(sessions)
+}
+
+pub fn get_session(id: &str) -> Result<TaskSession, String> {
+    let conn = connect_db()?;
+    let mut stmt = conn.prepare(
+        "SELECT id, title, repo_name, branch_name, status, created_at FROM task_sessions WHERE id = ?1"
+    ).map_err(|e| e.to_string())?;
+
+    stmt.query_row([id], |row| {
+        Ok(TaskSession {
+            id: row.get(0)?,
+            title: row.get(1)?,
+            repo_name: row.get(2)?,
+            branch_name: row.get(3)?,
+            status: row.get(4)?,
+            created_at: row.get(5)?,
+        })
+    }).map_err(|e| e.to_string())
+}
+
+pub fn add_message(session_id: &str, role: &str, content: &str) -> Result<TaskMessage, String> {
+    let conn = connect_db()?;
+    let created_at = chrono::Utc::now().timestamp();
+
+    conn.execute(
+        "INSERT INTO task_messages (session_id, role, content, created_at)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![session_id, role, content, created_at],
+    ).map_err(|e| e.to_string())?;
+
+    let id = conn.last_insert_rowid();
+
+    Ok(TaskMessage {
+        id,
+        session_id: session_id.to_string(),
+        role: role.to_string(),
+        content: content.to_string(),
+        created_at,
+    })
+}
+
+pub fn get_messages(session_id: &str) -> Result<Vec<TaskMessage>, String> {
+    let conn = connect_db()?;
+    let mut stmt = conn.prepare(
+        "SELECT id, session_id, role, content, created_at FROM task_messages WHERE session_id = ?1 ORDER BY created_at ASC"
+    ).map_err(|e| e.to_string())?;
+
+    let messages_iter = stmt.query_map([session_id], |row| {
+        Ok(TaskMessage {
+            id: row.get(0)?,
+            session_id: row.get(1)?,
+            role: row.get(2)?,
+            content: row.get(3)?,
+            created_at: row.get(4)?,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut messages = Vec::new();
+    for message in messages_iter {
+        messages.push(message.map_err(|e| e.to_string())?);
+    }
+    Ok(messages)
+}
