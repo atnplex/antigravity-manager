@@ -151,14 +151,23 @@ function AddAccountDialog({ onAdd }: AddAccountDialogProps) {
     if (activeTab !== "oauth") return;
     if (oauthUrl) return;
 
+    // Guard against stale updates if dialog/tab changes before promise resolves
+    let cancelled = false;
+
     invoke<any>("prepare_oauth_url")
       .then((res) => {
+        if (cancelled) return; // Don't update state if cleanup ran
         const url = typeof res === "string" ? res : res?.url;
         if (url && url.length > 0) setOauthUrl(url);
       })
       .catch((e) => {
+        if (cancelled) return;
         console.error("Failed to prepare OAuth URL:", e);
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [isOpen, activeTab, oauthUrl]);
 
   // If user navigates away from OAuth tab, cancel prepared flow to release the port.
@@ -178,6 +187,16 @@ function AddAccountDialog({ onAdd }: AddAccountDialogProps) {
     setRefreshToken("");
     setOauthUrl("");
     setOauthUrlCopied(false);
+  };
+
+  // Unified close handler that cancels OAuth if in progress
+  const closeDialog = async () => {
+    // Cancel any in-flight OAuth flow to release the loopback port
+    if (statusRef.current === "loading" && activeTabRef.current === "oauth") {
+      await cancelOAuthLogin().catch(() => {});
+    }
+    resetState();
+    setIsOpen(false);
   };
 
   const handleAction = async (
@@ -582,7 +601,7 @@ function AddAccountDialog({ onAdd }: AddAccountDialogProps) {
             {/* Click outside to close */}
             <div
               className="absolute inset-0 z-[0]"
-              onClick={() => setIsOpen(false)}
+              onClick={() => void closeDialog()}
             />
 
             <div className="bg-white dark:bg-base-100 text-gray-900 dark:text-base-content rounded-2xl shadow-2xl w-full max-w-lg p-6 relative z-[10] m-4 max-h-[90vh] overflow-y-auto">
@@ -821,12 +840,7 @@ function AddAccountDialog({ onAdd }: AddAccountDialogProps) {
               <div className="flex gap-3 w-full mt-6">
                 <button
                   className="flex-1 px-4 py-2.5 bg-gray-100 dark:bg-base-200 text-gray-700 dark:text-gray-300 font-medium rounded-xl hover:bg-gray-200 dark:hover:bg-base-300 transition-colors focus:outline-none focus:ring-2 focus:ring-200 dark:focus:ring-base-300"
-                  onClick={async () => {
-                    if (status === "loading" && activeTab === "oauth") {
-                      await cancelOAuthLogin();
-                    }
-                    setIsOpen(false);
-                  }}
+                  onClick={() => void closeDialog()}
                   disabled={status === "success"} // Only disable on success, allow cancel on loading
                 >
                   {t("accounts.add.btn_cancel")}
