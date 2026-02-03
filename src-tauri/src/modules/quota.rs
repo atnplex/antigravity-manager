@@ -83,18 +83,18 @@ async fn fetch_project_id(access_token: &str, email: &str) -> (Option<String>, O
             if res.status().is_success() {
                 if let Ok(data) = res.json::<LoadProjectResponse>().await {
                     let project_id = data.project_id.clone();
-                    
+
                     // Core logic: Priority to subscription ID from paid_tier, which better reflects actual account benefits than current_tier
                     let subscription_tier = data.paid_tier
                         .and_then(|t| t.id)
                         .or_else(|| data.current_tier.and_then(|t| t.id));
-                    
+
                     if let Some(ref tier) = subscription_tier {
                         crate::modules::logger::log_info(&format!(
                             "📊 [{}] Subscription identified successfully: {}", email, tier
                         ));
                     }
-                    
+
                     return (project_id, subscription_tier);
                 }
             } else {
@@ -107,7 +107,7 @@ async fn fetch_project_id(access_token: &str, email: &str) -> (Option<String>, O
             crate::modules::logger::log_error(&format!("❌ [{}] loadCodeAssist network error: {}", email, e));
         }
     }
-    
+
     (None, None)
 }
 
@@ -123,21 +123,31 @@ pub async fn fetch_quota_with_cache(
     cached_project_id: Option<&str>,
 ) -> crate::error::AppResult<(QuotaData, Option<String>)> {
     use crate::error::AppError;
-    
+
     // Optimization: Skip loadCodeAssist call if project_id is cached to save API quota
     let (project_id, subscription_tier) = if let Some(pid) = cached_project_id {
         (Some(pid.to_string()), None)
     } else {
         fetch_project_id(access_token, email).await
     };
-    
-    let final_project_id = project_id.as_deref().unwrap_or("bamboo-precept-lgxtn");
-    
+
+    // Generate mock ID first so it lives long enough
+    let mock_project_id = crate::proxy::project_resolver::generate_mock_project_id();
+
+    let final_project_id = project_id.as_deref().unwrap_or_else(|| {
+        crate::modules::logger::log_warn(&format!(
+            "⚠️  [{}] No project ID resolved, using randomized mock ID for quota check: {}",
+            email, mock_project_id
+        ));
+        &mock_project_id
+    });
+    let final_project_id_owned = final_project_id.to_string();
+
     let client = create_client();
     let payload = json!({
-        "project": final_project_id
+        "project": final_project_id_owned
     });
-    
+
     let url = QUOTA_API_URL;
     let mut last_error: Option<AppError> = None;
 
@@ -154,7 +164,7 @@ pub async fn fetch_quota_with_cache(
                 // Convert HTTP error status to AppError
                 if let Err(_) = response.error_for_status_ref() {
                     let status = response.status();
-                    
+
                     // ✅ Special handling for 403 Forbidden - return directly, no retry
                     if status == reqwest::StatusCode::FORBIDDEN {
                         crate::modules::logger::log_warn(&format!(
@@ -165,7 +175,7 @@ pub async fn fetch_quota_with_cache(
                         q.subscription_tier = subscription_tier.clone();
                         return Ok((q, project_id.clone()));
                     }
-                    
+
                     // Continue retry logic for other errors
                     if attempt < MAX_RETRIES {
                          let text = response.text().await.unwrap_or_default();
@@ -183,9 +193,9 @@ pub async fn fetch_quota_with_cache(
                     .json()
                     .await
                     .map_err(|e| AppError::Network(e))?;
-                
+
                 let mut quota_data = QuotaData::new();
-                
+
                 // Use debug level for detailed info to avoid console noise
                 tracing::debug!("Quota API returned {} models", quota_response.models.len());
 
@@ -194,19 +204,19 @@ pub async fn fetch_quota_with_cache(
                         let percentage = quota_info.remaining_fraction
                             .map(|f| (f * 100.0) as i32)
                             .unwrap_or(0);
-                        
+
                         let reset_time = quota_info.reset_time.unwrap_or_default();
-                        
+
                         // Only keep models we care about
                         if name.contains("gemini") || name.contains("claude") {
                             quota_data.add_model(name, percentage, reset_time);
                         }
                     }
                 }
-                
+
                 // Set subscription tier
                 quota_data.subscription_tier = subscription_tier.clone();
-                
+
                 return Ok((quota_data, project_id.clone()));
             },
             Err(e) => {
@@ -218,7 +228,7 @@ pub async fn fetch_quota_with_cache(
             }
         }
     }
-    
+
     Err(last_error.unwrap_or_else(|| AppError::Unknown("Quota fetch failed".to_string())))
 }
 
@@ -232,23 +242,23 @@ pub async fn fetch_quota_inner(access_token: &str, email: &str) -> crate::error:
 #[allow(dead_code)]
 pub async fn fetch_all_quotas(accounts: Vec<(String, String)>) -> Vec<(String, crate::error::AppResult<QuotaData>)> {
     let mut results = Vec::new();
-    
+
     for (account_id, access_token) in accounts {
         // In batch queries, pass account_id for log identification
         let result = fetch_quota(&access_token, &account_id).await.map(|(q, _)| q);
         results.push((account_id, result));
     }
-    
+
     results
 }
 
 /// Get valid token (auto-refresh if expired)
 pub async fn get_valid_token_for_warmup(account: &crate::models::account::Account) -> Result<(String, String), String> {
     let mut account = account.clone();
-    
+
     // Check and auto-refresh token
     let new_token = crate::modules::oauth::ensure_fresh_token(&account.token).await?;
-    
+
     // If token changed (meant refreshed), save it
     if new_token.access_token != account.token.access_token {
         account.token = new_token;
@@ -258,11 +268,11 @@ pub async fn get_valid_token_for_warmup(account: &crate::models::account::Accoun
             crate::modules::logger::log_info(&format!("[Warmup] Successfully refreshed and saved new token for {}", account.email));
         }
     }
-    
+
     // Fetch project_id
     let (project_id, _) = fetch_project_id(&account.token.access_token, &account.email).await;
     let final_pid = project_id.unwrap_or_else(|| "bamboo-precept-lgxtn".to_string());
-    
+
     Ok((account.token.access_token, final_pid))
 }
 
@@ -317,7 +327,7 @@ pub async fn warmup_model_directly(
 /// Smart warmup for all accounts
 pub async fn warm_up_all_accounts() -> Result<String, String> {
     let mut retry_count = 0;
-    
+
     loop {
         let target_accounts = crate::modules::account::list_accounts().unwrap_or_default();
 
@@ -353,7 +363,7 @@ pub async fn warm_up_all_accounts() -> Result<String, String> {
                     for m in fresh_quota.models {
                         if m.percentage >= 100 {
                             let model_to_ping = m.name.clone();
-                            
+
                             match model_to_ping.as_str() {
                                 "gemini-3-flash" | "claude-sonnet-4-5" | "gemini-3-pro-high" | "gemini-3-pro-image" => {
                                     if !account_warmed_series.contains(&model_to_ping) {
@@ -373,56 +383,56 @@ pub async fn warm_up_all_accounts() -> Result<String, String> {
 
         if !warmup_items.is_empty() {
             let total_before = warmup_items.len();
-            
+
             // Filter out models warmed up within 4 hours
             warmup_items.retain(|(email, model, _, _, _)| {
                 let history_key = format!("{}:{}:100", email, model);
                 !crate::modules::scheduler::check_cooldown(&history_key, 14400)
             });
-            
+
             if warmup_items.is_empty() {
                 let skipped = total_before;
                 crate::modules::logger::log_info(&format!("[Warmup] Returning to frontend: All models in cooldown, skipped {}", skipped));
                 return Ok(format!("All models are in 4-hour cooldown, skipped {} items", skipped));
             }
-            
+
             let total = warmup_items.len();
             let skipped = total_before - total;
-            
+
             if skipped > 0 {
                 crate::modules::logger::log_info(&format!(
                     "[Warmup] Skipped {} models in cooldown, preparing to warmup {}",
                     skipped, total
                 ));
             }
-            
+
             crate::modules::logger::log_info(&format!(
                 "[Warmup] 🔥 Starting manual warmup for {} models",
                 total
             ));
-            
+
             tokio::spawn(async move {
                 let mut success = 0;
                 let batch_size = 3;
                 let now_ts = chrono::Utc::now().timestamp();
-                
+
                 for (batch_idx, batch) in warmup_items.chunks(batch_size).enumerate() {
                     let mut handles = Vec::new();
-                    
+
                     for (email, model, token, pid, pct) in batch.iter() {
                         let email = email.clone();
                         let model = model.clone();
                         let token = token.clone();
                         let pid = pid.clone();
                         let pct = *pct;
-                        
+
                         let handle = tokio::spawn(async move {
                             let result = warmup_model_directly(&token, &model, &pid, &email, pct).await;
                             (result, email, model)
                         });
                         handles.push(handle);
                     }
-                    
+
                     for handle in handles {
                         match handle.await {
                             Ok((true, email, model)) => {
@@ -433,12 +443,12 @@ pub async fn warm_up_all_accounts() -> Result<String, String> {
                             _ => {}
                         }
                     }
-                    
+
                     if batch_idx < (warmup_items.len() + batch_size - 1) / batch_size - 1 {
                         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                     }
                 }
-                
+
                 crate::modules::logger::log_info(&format!("[Warmup] Warmup task completed: success {}/{}", success, total));
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                 let _ = crate::modules::account::refresh_all_quotas_logic().await;
@@ -462,18 +472,18 @@ pub async fn warm_up_all_accounts() -> Result<String, String> {
 pub async fn warm_up_account(account_id: &str) -> Result<String, String> {
     let accounts = crate::modules::account::list_accounts().unwrap_or_default();
     let account_owned = accounts.iter().find(|a| a.id == account_id).cloned().ok_or_else(|| "Account not found".to_string())?;
-    
+
     let email = account_owned.email.clone();
     let (token, pid) = get_valid_token_for_warmup(&account_owned).await?;
     let (fresh_quota, _) = fetch_quota_with_cache(&token, &email, Some(&pid)).await.map_err(|e| format!("Failed to fetch quota: {}", e))?;
-    
+
     let mut models_to_warm = Vec::new();
     let mut warmed_series = std::collections::HashSet::new();
 
     for m in fresh_quota.models {
         if m.percentage >= 100 {
             let model_name = m.name.clone();
-            
+
             // 2. Strict whitelist filtering
             match model_name.as_str() {
                 "gemini-3-flash" | "claude-sonnet-4-5" | "gemini-3-pro-high" | "gemini-3-pro-image" => {
@@ -492,7 +502,7 @@ pub async fn warm_up_account(account_id: &str) -> Result<String, String> {
     }
 
     let warmed_count = models_to_warm.len();
-    
+
     tokio::spawn(async move {
         for (name, pct) in models_to_warm {
             if warmup_model_directly(&token, &name, &pid, &email, pct).await {

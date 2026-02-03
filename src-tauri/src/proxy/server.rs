@@ -619,7 +619,7 @@ impl AxumServer {
                         match res {
                             Ok((stream, remote_addr)) => {
                                 let io = TokioIo::new(stream);
-                                
+
                                 // 注入 ConnectInfo (用于获取真实 IP)
                                 use tower::ServiceExt;
                                 use hyper::body::Incoming;
@@ -1815,14 +1815,15 @@ async fn admin_get_update_settings() -> impl IntoResponse {
 }
 
 async fn admin_check_for_updates() -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
-    let info = crate::modules::update_checker::check_for_updates()
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse { error: e }),
-            )
-        })?;
+    // Hardened: Immediate no-op return to prevent any upstream check
+    let info = crate::modules::update_checker::UpdateInfo {
+        has_update: false,
+        latest_version: crate::constants::FALLBACK_VERSION.to_string(),
+        current_version: crate::constants::FALLBACK_VERSION.to_string(),
+        download_url: "".to_string(),
+        release_notes: "".to_string(),
+        published_at: "".to_string(),
+    };
     Ok(Json(info))
 }
 
@@ -2562,7 +2563,7 @@ async fn handle_oauth_callback(
                         <div class="icon">✅</div>
                         <h1>Authorization Successful</h1>
                         <p>You can close this window now. The application should refresh automatically.</p>
-                        
+
                         <div class="fallback-box">
                             <span class="fallback-title">💡 Did it not refresh?</span>
                             <span class="fallback-text">If the application is running in a container or remote environment, you may need to manually copy the link below:</span>
