@@ -2154,6 +2154,8 @@ mod tests {
             protected_models: HashSet::new(),
             health_score,
             reset_time,
+            validation_blocked: false,
+            validation_blocked_until: 0,
         }
     }
 

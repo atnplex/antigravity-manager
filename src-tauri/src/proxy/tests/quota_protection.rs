@@ -34,6 +34,9 @@ mod tests {
             remaining_quota,
             protected_models: protected_models.iter().map(|s| s.to_string()).collect(),
             health_score: 1.0,
+            reset_time: None,
+            validation_blocked: false,
+            validation_blocked_until: 0,
         }
     }
 
