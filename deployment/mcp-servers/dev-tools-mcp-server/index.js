@@ -105,11 +105,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { code, options = {} } = args;
       const indent = options.indent || 2;
 
-      // Use temp file to avoid command injection
+      // Use secure temp directory to avoid race conditions
       const fs = await import("fs/promises");
       const os = await import("os");
       const path = await import("path");
-      const tempFile = path.join(os.tmpdir(), `temp-shfmt-${Date.now()}.sh`);
+      const tempDir = await fs.mkdtemp(
+        path.join(os.tmpdir(), "dev-tools-shfmt-"),
+      );
+      const tempFile = path.join(tempDir, "input.sh");
 
       try {
         await fs.writeFile(tempFile, code);
@@ -123,18 +126,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           ],
         };
       } finally {
-        await fs.unlink(tempFile).catch(() => {});
+        await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
       }
     }
 
     if (name === "format-python") {
       const { code, lineLength = 88 } = args;
 
-      // Use temp file to avoid command injection
+      // Use secure temp directory to avoid race conditions
       const fs = await import("fs/promises");
       const os = await import("os");
       const path = await import("path");
-      const tempFile = path.join(os.tmpdir(), `temp-black-${Date.now()}.py`);
+      const tempDir = await fs.mkdtemp(
+        path.join(os.tmpdir(), "dev-tools-black-"),
+      );
+      const tempFile = path.join(tempDir, "input.py");
 
       try {
         await fs.writeFile(tempFile, code);
@@ -149,7 +155,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           ],
         };
       } finally {
-        await fs.unlink(tempFile).catch(() => {});
+        await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
       }
     }
 
@@ -171,11 +177,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === "format-typescript") {
       const { code, semi = true, singleQuote = true } = args;
 
-      // Use temp file to avoid command injection
+      // Use secure temp directory to avoid race conditions
       const fs = await import("fs/promises");
       const os = await import("os");
       const path = await import("path");
-      const tempFile = path.join(os.tmpdir(), `temp-prettier-${Date.now()}.ts`);
+      const tempDir = await fs.mkdtemp(
+        path.join(os.tmpdir(), "dev-tools-prettier-"),
+      );
+      const tempFile = path.join(tempDir, "input.ts");
 
       try {
         await fs.writeFile(tempFile, code);
@@ -191,21 +200,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           ],
         };
       } finally {
-        await fs.unlink(tempFile).catch(() => {});
+        await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
       }
     }
 
     if (name === "lint-shell") {
       const { code } = args;
 
-      // Use temp file to avoid command injection
+      // Use secure temp directory to avoid race conditions
       const fs = await import("fs/promises");
       const os = await import("os");
-      const pathMod = await import("path");
-      const tempFile = pathMod.join(
-        os.tmpdir(),
-        `temp-shellcheck-${Date.now()}.sh`,
+      const path = await import("path");
+      const tempDir = await fs.mkdtemp(
+        path.join(os.tmpdir(), "dev-tools-shellcheck-"),
       );
+      const tempFile = path.join(tempDir, "input.sh");
 
       try {
         await fs.writeFile(tempFile, code);
@@ -229,7 +238,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           ],
         };
       } finally {
-        await fs.unlink(tempFile).catch(() => {});
+        await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
       }
     }
 
