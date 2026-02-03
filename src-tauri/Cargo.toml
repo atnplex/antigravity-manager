@@ -40,7 +40,7 @@ image = { version = "0.25.9", default-features = false, features = ["png", "webp
 thiserror = "2.0.17"
 
 # 反代服务依赖
-axum = { version = "0.7", features = ["multipart"] }
+axum = { version = "0.7", features = ["multipart", "ws"] }
 tokio-stream = { version = "0.1.17", features = ["sync"] }
 
 hyper = { version = "1", features = ["full"] }
@@ -69,6 +69,7 @@ toml = "0.8"
 toml_edit = "0.22"
 tauri-plugin-window-state = "2"
 parking_lot = "0.12.5"
+serde_yaml = "0.9"  # YAML frontmatter parsing for skills
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
