@@ -19,10 +19,10 @@ fn increase_nofile_limit() {
             rlim_cur: 0,
             rlim_max: 0,
         };
-        
+
         if libc::getrlimit(libc::RLIMIT_NOFILE, &mut rl) == 0 {
             info!("Current open file limit: soft={}, hard={}", rl.rlim_cur, rl.rlim_max);
-            
+
             // Attempt to increase to 4096 or maximum hard limit
             let target = 4096.min(rl.rlim_max);
             if rl.rlim_cur < target {
@@ -66,10 +66,10 @@ pub fn run() {
         error!("Failed to initialize security database: {}", e);
     }
 
-    
+
     if is_headless {
         info!("Starting in HEADLESS mode...");
-        
+
         let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
         rt.block_on(async {
             // Initialize states manually
@@ -79,8 +79,14 @@ pub fn run() {
             // Load config
             match modules::config::load_app_config() {
                 Ok(mut config) => {
-                    // Force LAN access in headless/docker mode so it binds to 0.0.0.0
-                    config.proxy.allow_lan_access = true;
+                    // Hardened: Do NOT force LAN access in headless mode. Default to localhost for security.
+                    // Requirement: explicit opt-in env var ALLOW_LAN=1 to bind 0.0.0.0
+                    if std::env::var("ALLOW_LAN").ok().as_deref() == Some("1") {
+                        config.proxy.allow_lan_access = true;
+                        info!("Headless mode with ALLOW_LAN=1: enabling 0.0.0.0 binding.");
+                    } else {
+                        info!("Headless mode: defaulting to localhost binding (secure). Set ALLOW_LAN=1 to bind 0.0.0.0.");
+                    }
 
                     // [NEW] 支持通过环境变量注入 API Key
                     // 优先级：ABV_API_KEY > API_KEY > 配置文件
@@ -100,7 +106,7 @@ pub fn run() {
                     let env_web_password = std::env::var("ABV_WEB_PASSWORD")
                         .or_else(|_| std::env::var("WEB_PASSWORD"))
                         .ok();
-                    
+
                     if let Some(pwd) = env_web_password {
                         if !pwd.trim().is_empty() {
                             info!("Using Web UI Password from environment variable");
@@ -113,7 +119,7 @@ pub fn run() {
                     let env_auth_mode = std::env::var("ABV_AUTH_MODE")
                         .or_else(|_| std::env::var("AUTH_MODE"))
                         .ok();
-                    
+
                     if let Some(mode_str) = env_auth_mode {
                         let mode = match mode_str.to_lowercase().as_str() {
                             "off" => Some(crate::proxy::ProxyAuthMode::Off),
@@ -143,7 +149,7 @@ pub fn run() {
                     info!("💡 Tips: You can use these keys to login to Web UI and access AI APIs.");
                     info!("💡 Search docker logs or grep gui_config.json to find them.");
                     info!("--------------------------------------------------");
-                    
+
                     // Start proxy service
                     if let Err(e) = commands::proxy::internal_start_proxy_service(
                         config.proxy,
@@ -154,9 +160,9 @@ pub fn run() {
                         error!("Failed to start proxy service in headless mode: {}", e);
                         std::process::exit(1);
                     }
-                    
+
                     info!("Headless proxy service is running.");
-                    
+
                     // Start smart scheduler
                     modules::scheduler::start_scheduler(None, proxy_state.clone());
                     info!("Smart scheduler started in headless mode.");
@@ -166,7 +172,7 @@ pub fn run() {
                     std::process::exit(1);
                 }
             }
-            
+
             // Wait for Ctrl-C
             tokio::signal::ctrl_c().await.ok();
             info!("Headless mode shutting down");
@@ -182,7 +188,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--minimized"]),
         ))
-        .plugin(tauri_plugin_updater::Builder::new().build())
+
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -226,7 +232,7 @@ pub fn run() {
 
             modules::tray::create_tray(app.handle())?;
             info!("Tray created");
-            
+
             // 立即启动管理服务器 (8045)，以便 Web 端能访问
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -235,7 +241,7 @@ pub fn run() {
                     let state = handle.state::<commands::proxy::ProxyServiceState>();
                     let cf_state = handle.state::<commands::cloudflared::CloudflaredState>();
                     let integration = crate::modules::integration::SystemManager::Desktop(handle.clone());
-                    
+
                     // 1. 确保管理后台开启
                     if let Err(e) = commands::proxy::ensure_admin_server(
                         config.proxy.clone(),
@@ -263,14 +269,14 @@ pub fn run() {
                     }
                 }
             });
-            
+
             // Start smart scheduler
             let scheduler_state = app.handle().state::<commands::proxy::ProxyServiceState>();
             modules::scheduler::start_scheduler(Some(app.handle().clone()), scheduler_state.inner().clone());
-            
+
             // [PHASE 1] 已整合至 Axum 端口 (8045)，不再单独启动 19527 端口
             info!("Management API integrated into main proxy server (port 8045)");
-            
+
             Ok(())
         })
         .on_window_event(|window, event| {

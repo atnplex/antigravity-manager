@@ -3,10 +3,16 @@ services:
     image: lbjlaq/antigravity-manager:latest
     container_name: antigravity-manager
     ports:
-      - "8045:8045"
+      # Bind to localhost only by default for security
+      # To enable LAN access, change to "8045:8045" AND set ALLOW_LAN=1 in .env
+      - "127.0.0.1:8045:8045"
     volumes:
       - ~/.antigravity_tools:/root/.antigravity_tools
     environment:
-      - LOG_LEVEL=info
-      - API_KEY=your-secret-key  # [重要] 請設置您的安全密鑰，若不設置則在日誌中查看隨機密鑰
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - API_KEY=${API_KEY:?API_KEY is not set. Please define it in the .env file.}
+      - WEB_PASSWORD=${WEB_PASSWORD:?WEB_PASSWORD is not set. Please define it in the .env file.}
+      - ALLOW_LAN=${ALLOW_LAN:-0}
     restart: unless-stopped
+    env_file:
+      - .env
