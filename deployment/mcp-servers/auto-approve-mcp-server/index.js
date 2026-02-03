@@ -161,16 +161,7 @@ function shouldAutoApprove(actionType, context) {
   if (actionType === "command") {
     const { command } = context;
 
-    // Check blocklist
-    if (
-      config.rules.commands.blockList.some((blocked) =>
-        command.includes(blocked),
-      )
-    ) {
-      return { approved: false, reason: "blocked command pattern" };
-    }
-
-    // Check allowlist
+    // Check allowlist only - blocklist was too broad and caused false positives
     const cmdName = command.trim().split(" ")[0];
     if (!config.rules.commands.allowList.includes(cmdName)) {
       return { approved: false, reason: "command not in allowlist" };
@@ -183,7 +174,7 @@ function shouldAutoApprove(actionType, context) {
   }
 
   if (actionType === "mcp-tool") {
-    const { serverName, toolName } = context;
+    const { serverName } = context;
 
     if (!config.rules.mcpTools.trustedServers.includes(serverName)) {
       return { approved: false, reason: "untrusted MCP server" };

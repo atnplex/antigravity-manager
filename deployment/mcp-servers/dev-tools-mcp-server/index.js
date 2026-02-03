@@ -105,36 +105,52 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { code, options = {} } = args;
       const indent = options.indent || 2;
 
-      // Write to temp file, format, read back
-      const { stdout } = await execAsync(
-        `echo ${JSON.stringify(code)} | shfmt -i ${indent}`,
-      );
+      // Use temp file to avoid command injection
+      const fs = await import("fs/promises");
+      const os = await import("os");
+      const path = await import("path");
+      const tempFile = path.join(os.tmpdir(), `temp-shfmt-${Date.now()}.sh`);
 
-      return {
-        content: [
-          {
-            type: "text",
-            text: stdout,
-          },
-        ],
-      };
+      try {
+        await fs.writeFile(tempFile, code);
+        const { stdout } = await execAsync(`shfmt -i ${indent} "${tempFile}"`);
+        return {
+          content: [
+            {
+              type: "text",
+              text: stdout,
+            },
+          ],
+        };
+      } finally {
+        await fs.unlink(tempFile).catch(() => {});
+      }
     }
 
     if (name === "format-python") {
       const { code, lineLength = 88 } = args;
 
-      const { stdout } = await execAsync(
-        `echo ${JSON.stringify(code)} | black -l ${lineLength} -`,
-      );
+      // Use temp file to avoid command injection
+      const fs = await import("fs/promises");
+      const os = await import("os");
+      const path = await import("path");
+      const tempFile = path.join(os.tmpdir(), `temp-black-${Date.now()}.py`);
 
-      return {
-        content: [
-          {
-            type: "text",
-            text: stdout,
-          },
-        ],
-      };
+      try {
+        await fs.writeFile(tempFile, code);
+        await execAsync(`black -l ${lineLength} "${tempFile}"`);
+        const stdout = await fs.readFile(tempFile, "utf8");
+        return {
+          content: [
+            {
+              type: "text",
+              text: stdout,
+            },
+          ],
+        };
+      } finally {
+        await fs.unlink(tempFile).catch(() => {});
+      }
     }
 
     if (name === "format-json") {
@@ -155,27 +171,45 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === "format-typescript") {
       const { code, semi = true, singleQuote = true } = args;
 
-      const { stdout } = await execAsync(
-        `echo ${JSON.stringify(code)} | prettier --parser typescript --semi=${semi} --single-quote=${singleQuote}`,
-      );
+      // Use temp file to avoid command injection
+      const fs = await import("fs/promises");
+      const os = await import("os");
+      const path = await import("path");
+      const tempFile = path.join(os.tmpdir(), `temp-prettier-${Date.now()}.ts`);
 
-      return {
-        content: [
-          {
-            type: "text",
-            text: stdout,
-          },
-        ],
-      };
+      try {
+        await fs.writeFile(tempFile, code);
+        const { stdout } = await execAsync(
+          `prettier --parser typescript --semi=${semi} --single-quote=${singleQuote} "${tempFile}"`,
+        );
+        return {
+          content: [
+            {
+              type: "text",
+              text: stdout,
+            },
+          ],
+        };
+      } finally {
+        await fs.unlink(tempFile).catch(() => {});
+      }
     }
 
     if (name === "lint-shell") {
       const { code } = args;
 
+      // Use temp file to avoid command injection
+      const fs = await import("fs/promises");
+      const os = await import("os");
+      const pathMod = await import("path");
+      const tempFile = pathMod.join(
+        os.tmpdir(),
+        `temp-shellcheck-${Date.now()}.sh`,
+      );
+
       try {
-        const { stdout } = await execAsync(
-          `echo ${JSON.stringify(code)} | shellcheck -`,
-        );
+        await fs.writeFile(tempFile, code);
+        const { stdout } = await execAsync(`shellcheck "${tempFile}"`);
 
         return {
           content: [
@@ -194,6 +228,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             },
           ],
         };
+      } finally {
+        await fs.unlink(tempFile).catch(() => {});
       }
     }
 
