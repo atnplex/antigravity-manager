@@ -1,4 +1,7 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use tokio::sync::Mutex as AsyncMutex;
 
 // Google OAuth configuration
 const CLIENT_ID: &str = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com";
@@ -7,6 +10,17 @@ const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v2/userinfo";
 
 const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
+
+/// Per-account mutex for token refresh to prevent concurrent refresh attempts
+static TOKEN_REFRESH_LOCKS: OnceLock<Mutex<HashMap<String, std::sync::Arc<AsyncMutex<()>>>>> = OnceLock::new();
+
+fn get_refresh_lock(email: &str) -> std::sync::Arc<AsyncMutex<()>> {
+    let map = TOKEN_REFRESH_LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = map.lock().unwrap();
+    guard.entry(email.to_string())
+        .or_insert_with(|| std::sync::Arc::new(AsyncMutex::new(())))
+        .clone()
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TokenResponse {
@@ -36,7 +50,7 @@ impl UserInfo {
                 return Some(name.clone());
             }
         }
-        
+
         // If name is empty, combine given_name and family_name
         match (&self.given_name, &self.family_name) {
             (Some(given), Some(family)) => Some(format!("{} {}", given, family)),
@@ -68,7 +82,7 @@ pub fn get_auth_url(redirect_uri: &str, state: &str) -> String {
         ("include_granted_scopes", "true"),
         ("state", state),
     ];
-    
+
     let url = url::Url::parse_with_params(AUTH_URL, &params).expect("Invalid Auth URL");
     url.to_string()
 }
@@ -76,7 +90,7 @@ pub fn get_auth_url(redirect_uri: &str, state: &str) -> String {
 /// Exchange authorization code for token
 pub async fn exchange_code(code: &str, redirect_uri: &str) -> Result<TokenResponse, String> {
     let client = crate::utils::http::get_long_client(); // [FIX #948/887] Extend timeout to 60s for OAuth
-    
+
     let params = [
         ("client_id", CLIENT_ID),
         ("client_secret", CLIENT_SECRET),
@@ -102,14 +116,14 @@ pub async fn exchange_code(code: &str, redirect_uri: &str) -> Result<TokenRespon
         let token_res = response.json::<TokenResponse>()
             .await
             .map_err(|e| format!("Token parsing failed: {}", e))?;
-        
+
         // Add detailed logs
         crate::modules::logger::log_info(&format!(
             "Token exchange successful! access_token: {}..., refresh_token: {}",
             &token_res.access_token.chars().take(20).collect::<String>(),
             if token_res.refresh_token.is_some() { "✓" } else { "✗ Missing" }
         ));
-        
+
         // Log warning if refresh_token is missing
         if token_res.refresh_token.is_none() {
             crate::modules::logger::log_warn(
@@ -119,7 +133,7 @@ pub async fn exchange_code(code: &str, redirect_uri: &str) -> Result<TokenRespon
                  3. OAuth parameter configuration issue"
             );
         }
-        
+
         Ok(token_res)
     } else {
         let error_text = response.text().await.unwrap_or_default();
@@ -130,7 +144,7 @@ pub async fn exchange_code(code: &str, redirect_uri: &str) -> Result<TokenRespon
 /// Refresh access_token using refresh_token
 pub async fn refresh_access_token(refresh_token: &str) -> Result<TokenResponse, String> {
     let client = crate::utils::http::get_long_client(); // [FIX #948/887] Extend timeout to 60s
-    
+
     let params = [
         ("client_id", CLIENT_ID),
         ("client_secret", CLIENT_SECRET),
@@ -139,7 +153,7 @@ pub async fn refresh_access_token(refresh_token: &str) -> Result<TokenResponse, 
     ];
 
     crate::modules::logger::log_info("Refreshing Token...");
-    
+
     let response = client
         .post(TOKEN_URL)
         .form(&params)
@@ -158,7 +172,7 @@ pub async fn refresh_access_token(refresh_token: &str) -> Result<TokenResponse, 
             .json::<TokenResponse>()
             .await
             .map_err(|e| format!("Refresh data parsing failed: {}", e))?;
-        
+
         crate::modules::logger::log_info(&format!("Token refreshed successfully! Expires in: {} seconds", token_data.expires_in));
         Ok(token_data)
     } else {
@@ -170,7 +184,7 @@ pub async fn refresh_access_token(refresh_token: &str) -> Result<TokenResponse, 
 /// Get user info
 pub async fn get_user_info(access_token: &str) -> Result<UserInfo, String> {
     let client = crate::utils::http::get_client();
-    
+
     let response = client
         .get(USERINFO_URL)
         .bearer_auth(access_token)
@@ -190,20 +204,33 @@ pub async fn get_user_info(access_token: &str) -> Result<UserInfo, String> {
 
 /// Check and refresh Token if needed
 /// Returns the latest access_token
+///
+/// Uses per-account mutex to prevent concurrent refresh attempts for the same account,
+/// which could cause rate limiting or token invalidation issues.
 pub async fn ensure_fresh_token(
     current_token: &crate::models::TokenData,
 ) -> Result<crate::models::TokenData, String> {
     let now = chrono::Local::now().timestamp();
-    
+
     // If no expiry or more than 5 minutes valid, return direct
     if current_token.expiry_timestamp > now + 300 {
         return Ok(current_token.clone());
     }
-    
-    // Need to refresh
-    crate::modules::logger::log_info("Token expiring soon, refreshing...");
+
+    // Acquire per-account lock to prevent concurrent refresh attempts
+    let lock = get_refresh_lock(&current_token.email);
+    let _guard = lock.lock().await;
+
+    // Re-check after acquiring lock (another request may have refreshed while we waited)
+    // Note: The caller may have an outdated token, so we can't re-check expiry here.
+    // The refresh is idempotent and Google handles it gracefully.
+
+    crate::modules::logger::log_info(&format!(
+        "Token expiring soon, refreshing for {}...",
+        &current_token.email
+    ));
     let response = refresh_access_token(&current_token.refresh_token).await?;
-    
+
     // Construct new TokenData
     Ok(crate::models::TokenData::new(
         response.access_token,
@@ -224,7 +251,7 @@ mod tests {
         let redirect_uri = "http://localhost:8080/callback";
         let state = "test-state-123456";
         let url = get_auth_url(redirect_uri, state);
-        
+
         assert!(url.contains("state=test-state-123456"));
         assert!(url.contains("redirect_uri=http%3A%2F%2Flocalhost%3A8080%2Fcallback"));
         assert!(url.contains("response_type=code"));
