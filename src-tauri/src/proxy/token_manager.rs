@@ -138,11 +138,16 @@ impl TokenManager {
                 continue;
             }
 
+            let account_id = path.file_stem()
+                .and_then(|s| s.to_str())
+                .ok_or_else(|| format!("Invalid filename: {:?}", path))?
+                .to_string();
+
             // 尝试加载账号
-            match self.load_single_account(&path).await {
+            match self.load_single_account(&account_id).await {
                 Ok(Some(token)) => {
-                    let account_id = token.account_id.clone();
-                    self.tokens.insert(account_id, token);
+                    let token_id = token.account_id.clone();
+                    self.tokens.insert(token_id, token);
                     count += 1;
                 }
                 Ok(None) => {
@@ -159,12 +164,8 @@ impl TokenManager {
 
     /// 重新加载指定账号（用于配额更新后的实时同步）
     pub async fn reload_account(&self, account_id: &str) -> Result<(), String> {
-        let path = self.safe_account_path(account_id)?;
-        if !path.exists() {
-            return Err(format!("账号文件不存在: {:?}", path));
-        }
-
-        match self.load_single_account(&path).await {
+        // Validation happens inside load_single_account via safe_account_path
+        match self.load_single_account(account_id).await {
             Ok(Some(token)) => {
                 self.tokens.insert(account_id.to_string(), token);
                 // [NEW] 重新加载账号时自动清除该账号的限流记录
@@ -184,31 +185,16 @@ impl TokenManager {
         Ok(count)
     }
 
-    /// 加载单个账号
-    async fn load_single_account(&self, path: &PathBuf) -> Result<Option<ProxyToken>, String> {
-        // [Security] Ensure path is strictly within accounts directory to prevent path traversal
-        let accounts_dir = self.data_dir.join("accounts");
+    /// 加载单个账号 (By ID, forcing safe path construction)
+    async fn load_single_account(&self, account_id: &str) -> Result<Option<ProxyToken>, String> {
+        // [Security] Always construct path safely from ID inside the function
+        let path = self.safe_account_path(account_id)?;
 
-        // 1. Structural check
-        if !path.starts_with(&accounts_dir) && !path.starts_with(accounts_dir.canonicalize().unwrap_or_default()) {
-             // If structural check fails, try canonicalization (slower but more accurate)
-             match (path.canonicalize(), accounts_dir.canonicalize()) {
-                 (Ok(p), Ok(d)) => {
-                     if !p.starts_with(d) {
-                         return Err(format!("Security violation: Path escapes accounts directory: {:?}", path));
-                     }
-                 },
-                 _ => {
-                     // If we can't canonicalize, be conservative if structural check also failed
-                     // Exception: if path is relative? But we expect absolute paths from safe_account_path
-                     if !path.starts_with(&accounts_dir) {
-                         return Err(format!("Security violation: Invalid account path: {:?}", path));
-                     }
-                 }
-             }
+        if !path.exists() {
+            return Err(format!("Account file not found: {:?}", path));
         }
 
-        let content = std::fs::read_to_string(path)
+        let content = std::fs::read_to_string(&path)
             .map_err(|e| format!("读取文件失败: {}", e))?;
 
         let mut account: serde_json::Value = serde_json::from_str(&content)
