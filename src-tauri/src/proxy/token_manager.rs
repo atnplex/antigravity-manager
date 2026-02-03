@@ -185,13 +185,8 @@ impl TokenManager {
     }
 
     /// 加载单个账号
-    /// Security: Validates path is within accounts directory to prevent path-injection
     async fn load_single_account(&self, path: &PathBuf) -> Result<Option<ProxyToken>, String> {
-        // Validate path is within the accounts directory to prevent path-injection
-        let accounts_dir = self.data_dir.join("accounts");
-        let validated_path = crate::utils::path::validate_data_path(path, &accounts_dir)?;
-
-        let content = std::fs::read_to_string(&validated_path)
+        let content = std::fs::read_to_string(path)
             .map_err(|e| format!("读取文件失败: {}", e))?;
 
         let mut account: serde_json::Value = serde_json::from_str(&content)
@@ -551,7 +546,6 @@ impl TokenManager {
 
     /// 触发配额保护，限制特定模型 (Issue #621)
     /// 返回 true 如果发生了改变
-    /// Security: Validates account_path before file operations
     async fn trigger_quota_protection(
         &self,
         account_json: &mut serde_json::Value,
@@ -561,11 +555,6 @@ impl TokenManager {
         threshold: i32,
         model_name: &str,
     ) -> Result<bool, String> {
-        // Validate path to prevent path-injection
-        let accounts_dir = self.data_dir.join("accounts");
-        let validated_path = crate::utils::path::validate_data_path(account_path, &accounts_dir)?;
-        let account_path = &validated_path;
-
         // 1. 初始化 protected_models 数组（如果不存在）
         if account_json.get("protected_models").is_none() {
             account_json["protected_models"] = serde_json::Value::Array(Vec::new());
@@ -599,7 +588,6 @@ impl TokenManager {
     }
 
     /// 检查并从账号级保护恢复（迁移至模型级，Issue #621）
-    /// Security: Validates account_path before file operations
     async fn check_and_restore_quota(
         &self,
         account_json: &mut serde_json::Value,
@@ -607,17 +595,6 @@ impl TokenManager {
         quota: &serde_json::Value,
         config: &crate::models::QuotaProtectionConfig,
     ) -> bool {
-        // Validate path to prevent path-injection
-        let accounts_dir = self.data_dir.join("accounts");
-        let validated_path = match crate::utils::path::validate_data_path(account_path, &accounts_dir) {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::error!("Path validation failed in check_and_restore_quota: {}", e);
-                return false;
-            }
-        };
-        let account_path = &validated_path;
-
         // [兼容性] 如果该账号当前处于 proxy_disabled=true 且原因是 quota_protection，
         // 我们将其 proxy_disabled 设为 false，但同时更新其 protected_models 列表。
         tracing::info!(
@@ -656,7 +633,6 @@ impl TokenManager {
 
     /// 恢复特定模型的配额保护 (Issue #621)
     /// 返回 true 如果发生了改变
-    /// Security: Validates account_path before file operations
     async fn restore_quota_protection(
         &self,
         account_json: &mut serde_json::Value,
@@ -664,11 +640,6 @@ impl TokenManager {
         account_path: &PathBuf,
         model_name: &str,
     ) -> Result<bool, String> {
-        // Validate path to prevent path-injection
-        let accounts_dir = self.data_dir.join("accounts");
-        let validated_path = crate::utils::path::validate_data_path(account_path, &accounts_dir)?;
-        let account_path = &validated_path;
-
         if let Some(arr) = account_json
             .get_mut("protected_models")
             .and_then(|v| v.as_array_mut())
@@ -1327,11 +1298,12 @@ impl TokenManager {
     }
 
     async fn disable_account(&self, account_id: &str, reason: &str) -> Result<(), String> {
-        // Use safe_account_path to prevent path-injection when constructing fallback path
         let path = if let Some(entry) = self.tokens.get(account_id) {
             entry.account_path.clone()
         } else {
-            self.safe_account_path(account_id)?
+            self.data_dir
+                .join("accounts")
+                .join(format!("{}.json", account_id))
         };
 
         let mut content: serde_json::Value = serde_json::from_str(
