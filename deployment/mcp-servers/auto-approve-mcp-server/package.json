@@ -1,0 +1,16 @@
+{
+  "name": "auto-approve-mcp-server",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Auto-approve AI agent actions with configurable safety rules",
+  "main": "index.js",
+  "bin": {
+    "auto-approve-mcp": "./index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

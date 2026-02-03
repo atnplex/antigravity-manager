@@ -1,0 +1,182 @@
+{
+	"servers": {
+		"auto-approve": {
+			"command": "node",
+			"args": [
+				"/home/alex/auto-approve-mcp-server/index.js"
+			],
+			"description": "Auto-approve AI agent actions with safety rules"
+		},
+		"dev-tools": {
+			"command": "node",
+			"args": [
+				"/home/alex/dev-tools-mcp-server/index.js"
+			],
+			"description": "Code formatters and linters (shfmt, black, prettier, shellcheck)"
+		},
+		"github": {
+			"command": "docker",
+			"args": [
+				"run",
+				"-i",
+				"--rm",
+				"ghcr.io/github/github-mcp-server"
+			],
+			"env": {
+				"GITHUB_TOKEN": "${GITHUB_TOKEN}"
+			},
+			"description": "GitHub repository management and code search"
+		},
+		"filesystem": {
+			"command": "docker",
+			"args": [
+				"run",
+				"-i",
+				"--rm",
+				"-v",
+				"/home/alex:/workspace",
+				"-v",
+				"/mnt/c/Users/alex:/windows",
+				"mcp/filesystem"
+			],
+			"description": "Read/write files across WSL and Windows"
+		},
+		"memory": {
+			"command": "docker",
+			"args": [
+				"run",
+				"-i",
+				"--rm",
+				"-v",
+				"mcp-memory:/data",
+				"mcp/memory"
+			],
+			"description": "Persistent agent memory across conversations"
+		},
+		"git": {
+			"command": "docker",
+			"args": [
+				"run",
+				"-i",
+				"--rm",
+				"-v",
+				"/home/alex:/workspace",
+				"mcp/git"
+			],
+			"description": "Git operations and version control"
+		},
+		"brave-search": {
+			"command": "docker",
+			"args": [
+				"run",
+				"-i",
+				"--rm",
+				"mcp/brave-search"
+			],
+			"env": {
+				"BRAVE_API_KEY": "${BRAVE_API_KEY}"
+			},
+			"description": "Web search via Brave Search API"
+		},
+		"perplexity": {
+			"command": "docker",
+			"args": [
+				"run",
+				"-i",
+				"--rm",
+				"mekayelanik/perplexity-mcp:stable"
+			],
+			"env": {
+				"PERPLEXITY_API_KEY": "${PERPLEXITY_API_KEY}"
+			},
+			"description": "Perplexity AI search and research"
+		},
+		"fetch": {
+			"command": "docker",
+			"args": [
+				"run",
+				"-i",
+				"--rm",
+				"mcp/fetch"
+			],
+			"description": "Fetch and read web pages"
+		},
+		"cloudflare-workers": {
+			"command": "npx",
+			"args": [
+				"-y",
+				"mcp-remote",
+				"https://builds.mcp.cloudflare.com/mcp"
+			],
+			"env": {
+				"CLOUDFLARE_API_TOKEN": "${CLOUDFLARE_API_TOKEN}"
+			},
+			"description": "Deploy and manage Cloudflare Workers"
+		},
+		"cloudflare-observability": {
+			"command": "npx",
+			"args": [
+				"-y",
+				"mcp-remote",
+				"https://observability.mcp.cloudflare.com/mcp"
+			],
+			"env": {
+				"CLOUDFLARE_API_TOKEN": "${CLOUDFLARE_API_TOKEN}"
+			},
+			"description": "Monitor Workers logs and performance"
+		},
+		"cloudflare-browser": {
+			"command": "npx",
+			"args": [
+				"-y",
+				"mcp-remote",
+				"https://browser.mcp.cloudflare.com/mcp"
+			],
+			"env": {
+				"CLOUDFLARE_API_TOKEN": "${CLOUDFLARE_API_TOKEN}"
+			},
+			"description": "Browser automation and screenshots"
+		},
+		"cloudflare-ai-gateway": {
+			"command": "npx",
+			"args": [
+				"-y",
+				"mcp-remote",
+				"https://ai-gateway.mcp.cloudflare.com/mcp"
+			],
+			"env": {
+				"CLOUDFLARE_API_TOKEN": "${CLOUDFLARE_API_TOKEN}"
+			},
+			"description": "Manage AI API requests through Cloudflare"
+		},
+		"docker": {
+			"command": "npx",
+			"args": [
+				"-y",
+				"@modelcontextprotocol/server-docker"
+			],
+			"description": "Official Docker MCP - containers, images, networks, volumes"
+		},
+		"docker-gateway": {
+			"command": "docker",
+			"args": [
+				"mcp",
+				"gateway",
+				"run"
+			],
+			"description": "Docker container management"
+		},
+		"remote-http": {
+			"url": "http://100.114.18.47",
+			"type": "http",
+			"description": "Remote MCP server"
+		}
+	},
+	"inputs": [],
+	"proxy": {
+		"enabled": true,
+		"port": 8045,
+		"path": "/mcp",
+		"description": "Antigravity Manager MCP Proxy - accessible locally and via Cloudflare/Tailscale"
+	}
+}

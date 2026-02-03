@@ -9,9 +9,9 @@ use crate::proxy::session_manager::SessionManager;
 use crate::proxy::handlers::common::{determine_retry_strategy, apply_retry_strategy, should_rotate_account, RetryStrategy};
 use crate::proxy::debug_logger;
 use tokio::time::Duration;
- 
+
 const MAX_RETRY_ATTEMPTS: usize = 3;
- 
+
 /// 处理 generateContent 和 streamGenerateContent
 /// 路径参数: model_name, method (e.g. "gemini-pro", "generateContent")
 pub async fn handle_generate(
@@ -59,7 +59,7 @@ pub async fn handle_generate(
     let token_manager = state.token_manager;
     let pool_size = token_manager.len();
     let max_attempts = MAX_RETRY_ATTEMPTS.min(pool_size).max(1);
-    
+
     let mut last_error = String::new();
     let mut last_email: Option<String> = None;
 
@@ -140,13 +140,16 @@ pub async fn handle_generate(
 
         let status = response.status();
         if status.is_success() {
+            // [智能限流] 延迟到确认没有隐藏错误后再标记成功
+            // token_manager.mark_account_success(&email);
+
             // 6. 响应处理
             if is_stream {
                 use axum::body::Body;
                 use axum::response::Response;
                 use bytes::{Bytes, BytesMut};
                 use futures::StreamExt;
-                
+
                 let meta = json!({
                     "protocol": "gemini",
                     "trace_id": trace_id,
@@ -176,7 +179,33 @@ pub async fn handle_generate(
                             tracing::warn!("[Gemini] Empty first chunk received, retrying...");
                             retry_gemini = true;
                         } else {
-                            first_chunk = Some(bytes);
+                            // [FIX] 探测隐藏错误 (200 OK 但含有 error JSON)
+                            if let Ok(line_str) = std::str::from_utf8(&bytes) {
+                                let trimmed = line_str.trim();
+                                let json_part = if trimmed.starts_with("data: ") {
+                                    trimmed.trim_start_matches("data: ").trim()
+                                } else {
+                                    trimmed
+                                };
+
+                                if let Ok(json) = serde_json::from_str::<Value>(json_part) {
+                                    if let Some(error) = json.get("error") {
+                                        let error_text = error.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error");
+                                        let error_status = error.get("code").and_then(|c| c.as_u64()).map(|c| c as u16).unwrap_or(429);
+
+                                        tracing::warn!("[Gemini] Hidden error detected in 200 OK stream peek: {}", error_text);
+                                        token_manager.mark_rate_limited_async(&email, error_status, None, &error_text, Some(&mapped_model)).await;
+                                        last_error = error_text.to_string();
+                                        retry_gemini = true;
+                                    }
+                                }
+                            }
+
+                            if !retry_gemini {
+                                first_chunk = Some(bytes);
+                                // 此处确认为真成功
+                                token_manager.mark_account_success(&email);
+                            }
                         }
                     }
                     Ok(Some(Err(e))) => {
@@ -227,14 +256,14 @@ pub async fn handle_generate(
                             if let Ok(line_str) = std::str::from_utf8(&line_raw) {
                                 let line = line_str.trim();
                                 if line.is_empty() { continue; }
-                                
+
                                 if line.starts_with("data: ") {
                                     let json_part = line.trim_start_matches("data: ").trim();
                                     if json_part == "[DONE]" {
                                         yield Ok::<Bytes, String>(Bytes::from("data: [DONE]\n\n"));
                                         continue;
                                     }
-                                    
+
                                     match serde_json::from_str::<Value>(json_part) {
                                         Ok(mut json) => {
                                             // [FIX #765] Extract thoughtSignature from stream
@@ -285,7 +314,7 @@ pub async fn handle_generate(
                         }
                     }
                 };
-                
+
                 if client_wants_stream {
                     let body = Body::from_stream(stream);
                     return Ok(Response::builder()
@@ -303,6 +332,17 @@ pub async fn handle_generate(
                     use crate::proxy::mappers::gemini::collector::collect_stream_to_json;
                     match collect_stream_to_json(Box::pin(stream), &s_id).await {
                          Ok(gemini_resp) => {
+                             // [FIX] 探测隐藏错误 (200 OK 但含有 error JSON) - 流式收集路径
+                             if let Some(error) = gemini_resp.get("error") {
+                                 let error_text = error.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error");
+                                 let error_status = error.get("code").and_then(|c| c.as_u64()).map(|c| c as u16).unwrap_or(429);
+
+                                 tracing::warn!("[Gemini] Hidden error detected in captured stream: {}", error_text);
+                                 token_manager.mark_rate_limited_async(&email, error_status, None, &error_text, Some(&mapped_model)).await;
+                                 last_error = error_text.to_string();
+                                 continue; // 触发轮换
+                             }
+
                              info!("[{}] ✓ Stream collected and converted to JSON (Gemini)", session_id);
                              let unwrapped = unwrap_response(&gemini_resp);
                              return Ok((StatusCode::OK, [("X-Account-Email", email.as_str()), ("X-Mapped-Model", mapped_model.as_str())], Json(unwrapped)).into_response());
@@ -319,6 +359,20 @@ pub async fn handle_generate(
                 .json()
                 .await
                 .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Parse error: {}", e)))?;
+
+            // [FIX] 探测隐藏错误 (200 OK 但含有 error JSON) - 非流式路径
+            if let Some(error) = gemini_resp.get("error") {
+                let error_text = error.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error");
+                let error_status = error.get("code").and_then(|c| c.as_u64()).map(|c| c as u16).unwrap_or(429);
+
+                tracing::warn!("[Gemini] Hidden error detected in 200 OK response: {}", error_text);
+                token_manager.mark_rate_limited_async(&email, error_status, None, &error_text, Some(&mapped_model)).await;
+                last_error = error_text.to_string();
+                continue;
+            }
+
+            // 此处确认为真成功
+            token_manager.mark_account_success(&email);
 
             // [FIX #765] Extract thoughtSignature from non-streaming response
             let inner_val = if gemini_resp.get("response").is_some() {
@@ -366,7 +420,12 @@ pub async fn handle_generate(
             });
             debug_logger::write_debug_payload(&debug_cfg, Some(&trace_id), "upstream_response_error", &payload).await;
         }
- 
+
+        // [智能限流] 标记限流状态(用于 UI 显示) - 使用异步版本以支持实时配额刷新
+        if status_code == 429 || status_code == 529 || status_code == 503 || status_code == 500 {
+            token_manager.mark_rate_limited_async(&email, status_code, retry_after.as_deref(), &error_text, Some(&mapped_model)).await;
+        }
+
         // 确定重试策略
         let strategy = determine_retry_strategy(status_code, &error_text, false);
         let trace_id = format!("gemini_{}", session_id);
@@ -381,7 +440,7 @@ pub async fn handle_generate(
         }
 
         // [NEW] 处理 400 错误 (Thinking 签名失效)
-        if status_code == 400 
+        if status_code == 400
             && (error_text.contains("Invalid `signature`")
                 || error_text.contains("thinking.signature")
                 || error_text.contains("Invalid signature")
@@ -391,7 +450,7 @@ pub async fn handle_generate(
                 "[Gemini] Signature error detected on account {}, retrying without thinking",
                 email
             );
-            
+
             // 追加修复提示词到请求体的最后一条内容
             if let Some(contents) = body.get_mut("contents").and_then(|v| v.as_array_mut()) {
                 if let Some(last_content) = contents.last_mut() {
@@ -403,10 +462,10 @@ pub async fn handle_generate(
                     }
                 }
             }
-            
+
             continue; // 重试
         }
- 
+
         // 404 等由于模型配置或路径错误的 HTTP 异常，直接报错，不进行无效轮换
         error!("Gemini Upstream non-retryable error {}: {}", status_code, error_text);
         return Ok((status, [("X-Account-Email", email.as_str())], error_text).into_response());
@@ -457,6 +516,6 @@ pub async fn handle_count_tokens(State(state): State<AppState>, Path(_model_name
     let model_group = "gemini";
     let (_access_token, _project_id, _, _wait_ms) = state.token_manager.get_token(model_group, false, None, "gemini").await
         .map_err(|e| (StatusCode::SERVICE_UNAVAILABLE, format!("Token error: {}", e)))?;
-    
+
     Ok(Json(json!({"totalTokens": 0})))
 }
