@@ -225,10 +225,22 @@ impl AxumServer {
     }
 
     pub async fn update_user_agent(&self, config: &crate::proxy::config::ProxyConfig) {
+        // Update static override
         self.upstream
             .set_user_agent_override(config.user_agent_override.clone())
             .await;
-        tracing::info!("User-Agent 配置已热更新: {:?}", config.user_agent_override);
+
+        // Update rotation settings
+        self.upstream
+            .update_ua_rotation(config.user_agent_pool.clone(), config.ua_rotation_mode.clone())
+            .await;
+
+        tracing::info!(
+            "User-Agent 配置已热更新: override={:?}, rotation_mode={:?}, pool_size={}",
+            config.user_agent_override,
+            config.ua_rotation_mode,
+            config.user_agent_pool.len()
+        );
     }
 
     pub async fn set_running(&self, running: bool) {

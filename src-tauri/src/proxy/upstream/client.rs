@@ -5,6 +5,11 @@ use reqwest::{header, Client, Response, StatusCode};
 use serde_json::Value;
 use tokio::time::Duration;
 use tokio::sync::RwLock;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use rand::Rng;
+
+use crate::proxy::config::UaRotationMode;
 
 // Cloud Code v1internal endpoints (fallback order: Sandbox → Daily → Prod)
 // 优先使用 Sandbox/Daily 环境以避免 Prod环境的 429 错误 (Ref: Issue #1176)
@@ -21,6 +26,8 @@ const V1_INTERNAL_BASE_URL_FALLBACKS: [&str; 3] = [
 pub struct UpstreamClient {
     http_client: Client,
     user_agent_override: RwLock<Option<String>>,
+    user_agent_pool: RwLock<Vec<String>>,
+    ua_rotation_mode: RwLock<UaRotationMode>,
 }
 
 impl UpstreamClient {
@@ -45,10 +52,23 @@ impl UpstreamClient {
 
         let http_client = builder.build().expect("Failed to create HTTP client");
 
-        Self { 
+        Self {
             http_client,
             user_agent_override: RwLock::new(None),
+            user_agent_pool: RwLock::new(Vec::new()),
+            ua_rotation_mode: RwLock::new(UaRotationMode::Off),
         }
+    }
+
+    /// Update UA rotation settings from config
+    pub async fn update_ua_rotation(&self, pool: Vec<String>, mode: UaRotationMode) {
+        let mut pool_lock = self.user_agent_pool.write().await;
+        *pool_lock = pool;
+        drop(pool_lock);
+
+        let mut mode_lock = self.ua_rotation_mode.write().await;
+        *mode_lock = mode;
+        tracing::info!("UA rotation updated: mode={:?}, pool_size={}", mode, self.user_agent_pool.read().await.len());
     }
 
     /// 设置动态 User-Agent 覆盖
@@ -58,14 +78,59 @@ impl UpstreamClient {
         tracing::debug!("UpstreamClient User-Agent override updated: {:?}", lock);
     }
 
-    /// 获取当前生效的 User-Agent
-    pub async fn get_user_agent(&self) -> String {
+    /// 获取当前生效的 User-Agent (supports rotation)
+    ///
+    /// # Arguments
+    /// * `session_id` - Optional session ID for per-session rotation
+    /// * `account_id` - Optional account ID for per-account rotation
+    pub async fn get_user_agent_rotated(&self, session_id: Option<&str>, account_id: Option<&str>) -> String {
+        // Priority 1: Static override always wins
         let ua_override = self.user_agent_override.read().await;
-        ua_override.as_ref().cloned().unwrap_or_else(|| crate::constants::USER_AGENT.clone())
+        if let Some(ua) = ua_override.as_ref() {
+            return ua.clone();
+        }
+        drop(ua_override);
+
+        // Priority 2: Rotation based on mode
+        let mode = self.ua_rotation_mode.read().await.clone();
+        let pool = self.user_agent_pool.read().await;
+
+        if pool.is_empty() || mode == UaRotationMode::Off {
+            return crate::constants::USER_AGENT.clone();
+        }
+
+        let index = match mode {
+            UaRotationMode::Off => 0,
+            UaRotationMode::PerRequest => {
+                rand::rng().random_range(0..pool.len())
+            }
+            UaRotationMode::PerSession => {
+                let key = session_id.unwrap_or("default-session");
+                Self::stable_hash(key) as usize % pool.len()
+            }
+            UaRotationMode::PerAccount => {
+                let key = account_id.unwrap_or("default-account");
+                Self::stable_hash(key) as usize % pool.len()
+            }
+        };
+
+        pool.get(index).cloned().unwrap_or_else(|| crate::constants::USER_AGENT.clone())
+    }
+
+    /// Stable hash for deterministic selection
+    fn stable_hash(input: &str) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        input.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// 获取当前生效的 User-Agent (legacy - no rotation context)
+    pub async fn get_user_agent(&self) -> String {
+        self.get_user_agent_rotated(None, None).await
     }
 
     /// 构建 v1internal URL
-    /// 
+    ///
     /// 构建 API 请求地址
     fn build_url(base_url: &str, method: &str, query_string: Option<&str>) -> String {
         if let Some(qs) = query_string {
@@ -76,7 +141,7 @@ impl UpstreamClient {
     }
 
     /// 判断是否应尝试下一个端点
-    /// 
+    ///
     /// 当遇到以下错误时，尝试切换到备用端点：
     /// - 429 Too Many Requests（限流）
     /// - 408 Request Timeout（超时）
@@ -90,7 +155,7 @@ impl UpstreamClient {
     }
 
     /// 调用 v1internal API（基础方法）
-    /// 
+    ///
     /// 发起基础网络请求，支持多端点自动 Fallback
     pub async fn call_v1_internal(
         &self,
@@ -207,16 +272,16 @@ impl UpstreamClient {
     }
 
     /// 调用 v1internal API（带 429 重试,支持闭包）
-    /// 
+    ///
     /// 带容错和重试的核心请求逻辑
-    /// 
+    ///
     /// # Arguments
     /// * `method` - API method (e.g., "generateContent")
     /// * `query_string` - Optional query string (e.g., "?alt=sse")
     /// * `get_credentials` - 闭包，获取凭证（支持账号轮换）
     /// * `build_body` - 闭包，接收 project_id 构建请求体
     /// * `max_attempts` - 最大重试次数
-    /// 
+    ///
     /// # Returns
     /// HTTP Response
     // 已移除弃用的重试方法 (call_v1_internal_with_retry)
@@ -226,7 +291,7 @@ impl UpstreamClient {
     // 已移除弃用的辅助方法 (parse_duration_ms)
 
     /// 获取可用模型列表
-    /// 
+    ///
     /// 获取远端模型列表，支持多端点自动 Fallback
     #[allow(dead_code)] // API ready for future model discovery feature
     pub async fn fetch_available_models(&self, access_token: &str) -> Result<Value, String> {
@@ -325,7 +390,7 @@ mod tests {
     #[test]
     fn test_build_url() {
         let base_url = "https://cloudcode-pa.googleapis.com/v1internal";
-        
+
         let url1 = UpstreamClient::build_url(base_url, "generateContent", None);
         assert_eq!(
             url1,
