@@ -1,5 +1,8 @@
 import { TrendingUp } from 'lucide-react';
+import { memo, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Account } from '../../types/account';
+import { getBestAccounts } from '../../utils/dashboardUtils';
 
 interface BestAccountsProps {
     accounts: Account[];
@@ -7,62 +10,12 @@ interface BestAccountsProps {
     onSwitch?: (accountId: string) => void;
 }
 
-import { useTranslation } from 'react-i18next';
-
-function BestAccounts({ accounts, currentAccountId, onSwitch }: BestAccountsProps) {
+const BestAccounts = memo(({ accounts, currentAccountId, onSwitch }: BestAccountsProps) => {
     const { t } = useTranslation();
-    // 1. 获取按配额排序的列表 (排除当前账号)
-    const geminiSorted = accounts
-        .filter(a => a.id !== currentAccountId)
-        .map(a => {
-            const proQuota = a.quota?.models.find(m => m.name.toLowerCase() === 'gemini-3-pro-high')?.percentage || 0;
-            const flashQuota = a.quota?.models.find(m => m.name.toLowerCase() === 'gemini-3-flash')?.percentage || 0;
-            // 综合评分：Pro 权重更高 (70%)，Flash 权重 30%
-            return {
-                ...a,
-                quotaVal: Math.round(proQuota * 0.7 + flashQuota * 0.3),
-            };
-        })
-        .filter(a => a.quotaVal > 0)
-        .sort((a, b) => b.quotaVal - a.quotaVal);
 
-    const claudeSorted = accounts
-        .filter(a => a.id !== currentAccountId)
-        .map(a => ({
-            ...a,
-            quotaVal: a.quota?.models.find(m => m.name.toLowerCase().includes('claude'))?.percentage || 0,
-        }))
-        .filter(a => a.quotaVal > 0)
-        .sort((a, b) => b.quotaVal - a.quotaVal);
-
-    let bestGemini = geminiSorted[0];
-    let bestClaude = claudeSorted[0];
-
-    // 2. 如果推荐是同一个账号，且有其他选择，尝试寻找最优的"不同账号"组合
-    if (bestGemini && bestClaude && bestGemini.id === bestClaude.id) {
-        const nextGemini = geminiSorted[1];
-        const nextClaude = claudeSorted[1];
-
-        // 方案A: 保持 Gemini 最优，换 Claude 次优
-        // 方案B: 换 Gemini 次优，保持 Claude 最优
-        // 比较标准：两者配额之和最大化 (或者优先保住 100% 的那个)
-
-        const scoreA = bestGemini.quotaVal + (nextClaude?.quotaVal || 0);
-        const scoreB = (nextGemini?.quotaVal || 0) + bestClaude.quotaVal;
-
-        if (nextClaude && (!nextGemini || scoreA >= scoreB)) {
-            // 选方案A：换 Claude
-            bestClaude = nextClaude;
-        } else if (nextGemini) {
-            // 选方案B：换 Gemini
-            bestGemini = nextGemini;
-        }
-        // 如果都没有次优解（例如只有一个账号），则保持原样
-    }
-
-    // 构造最终用于显示的视图模型 (兼容原有渲染逻辑)
-    const bestGeminiRender = bestGemini ? { ...bestGemini, geminiQuota: bestGemini.quotaVal } : undefined;
-    const bestClaudeRender = bestClaude ? { ...bestClaude, claudeQuota: bestClaude.quotaVal } : undefined;
+    const { bestGemini: bestGeminiRender, bestClaude: bestClaudeRender } = useMemo(() =>
+        getBestAccounts(accounts, currentAccountId),
+    [accounts, currentAccountId]);
 
     return (
         <div className="bg-white dark:bg-base-100 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-base-200 h-full flex flex-col">
@@ -116,7 +69,7 @@ function BestAccounts({ accounts, currentAccountId, onSwitch }: BestAccountsProp
                         onClick={() => {
                             // 优先切换到配额更高的账号
                             let targetId = bestGeminiRender?.id;
-                            if (bestClaudeRender && (!bestGeminiRender || bestClaudeRender.claudeQuota > bestGeminiRender.geminiQuota)) {
+                            if (bestClaudeRender && (!bestGeminiRender || (bestClaudeRender.claudeQuota || 0) > (bestGeminiRender.geminiQuota || 0))) {
                                 targetId = bestClaudeRender.id;
                             }
 
@@ -132,6 +85,6 @@ function BestAccounts({ accounts, currentAccountId, onSwitch }: BestAccountsProp
         </div>
     );
 
-}
+});
 
 export default BestAccounts;
