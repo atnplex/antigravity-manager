@@ -360,11 +360,16 @@ function AddAccountDialog({ onAdd }: AddAccountDialogProps) {
       // 3. 监听消息
       const handleMessage = async (event: MessageEvent) => {
         // Security: Validate origin to prevent cross-origin attacks
-        const allowedOrigins = [
-          window.location.origin,
-          // Add your proxy server origin if different
-        ];
-        if (!allowedOrigins.includes(event.origin)) {
+        // OAuth callback originates from localhost:{EPHEMERAL_PORT} loopback listener
+        const isAllowedOrigin = (origin: string): boolean => {
+          // Same origin is always allowed
+          if (origin === window.location.origin) return true;
+          // Allow localhost on any port (OAuth loopback callback)
+          if (/^http:\/\/localhost(:\d+)?$/.test(origin)) return true;
+          if (/^http:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)) return true;
+          return false;
+        };
+        if (!isAllowedOrigin(event.origin)) {
           console.warn(
             "Rejected postMessage from untrusted origin:",
             event.origin,
