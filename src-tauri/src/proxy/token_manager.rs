@@ -186,6 +186,28 @@ impl TokenManager {
 
     /// 加载单个账号
     async fn load_single_account(&self, path: &PathBuf) -> Result<Option<ProxyToken>, String> {
+        // [Security] Ensure path is strictly within accounts directory to prevent path traversal
+        let accounts_dir = self.data_dir.join("accounts");
+
+        // 1. Structural check
+        if !path.starts_with(&accounts_dir) && !path.starts_with(accounts_dir.canonicalize().unwrap_or_default()) {
+             // If structural check fails, try canonicalization (slower but more accurate)
+             match (path.canonicalize(), accounts_dir.canonicalize()) {
+                 (Ok(p), Ok(d)) => {
+                     if !p.starts_with(d) {
+                         return Err(format!("Security violation: Path escapes accounts directory: {:?}", path));
+                     }
+                 },
+                 _ => {
+                     // If we can't canonicalize, be conservative if structural check also failed
+                     // Exception: if path is relative? But we expect absolute paths from safe_account_path
+                     if !path.starts_with(&accounts_dir) {
+                         return Err(format!("Security violation: Invalid account path: {:?}", path));
+                     }
+                 }
+             }
+        }
+
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("读取文件失败: {}", e))?;
 
