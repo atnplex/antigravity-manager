@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import ModalDialog from '../common/ModalDialog';
 import { useTranslation } from 'react-i18next';
 import { request as invoke } from '../../utils/request';
@@ -12,7 +13,7 @@ import { isTauri } from '../../utils/env';
 import { copyToClipboard } from '../../utils/clipboard';
 
 
-interface ProxyRequestLog {
+export interface ProxyRequestLog {
     id: string;
     timestamp: number;
     method: string;
@@ -41,21 +42,39 @@ interface ProxyMonitorProps {
 }
 
 // Log Table Component
-interface LogTableProps {
+export interface LogTableProps {
     logs: ProxyRequestLog[];
     loading: boolean;
     onLogClick: (log: ProxyRequestLog) => void;
     t: any;
 }
 
-const LogTable: React.FC<LogTableProps> = ({
+export const LogTable: React.FC<LogTableProps> = ({
     logs,
     loading,
     onLogClick,
     t
 }) => {
+    const parentRef = useRef<HTMLDivElement>(null);
+
+    const rowVirtualizer = useVirtualizer({
+        count: logs.length,
+        getScrollElement: () => parentRef.current,
+        estimateSize: () => 40,
+        overscan: 10,
+    });
+
+    const virtualRows = rowVirtualizer.getVirtualItems();
+    const totalSize = rowVirtualizer.getTotalSize();
+
+    const paddingTop = virtualRows.length > 0 ? virtualRows[0].start : 0;
+    const paddingBottom = virtualRows.length > 0
+        ? totalSize - virtualRows[virtualRows.length - 1].end
+        : 0;
+
     return (
         <div
+            ref={parentRef}
             className="flex-1 overflow-y-auto overflow-x-auto bg-white dark:bg-base-100"
         >
             <table className="table table-xs w-full">
@@ -73,49 +92,64 @@ const LogTable: React.FC<LogTableProps> = ({
                     </tr>
                 </thead>
                 <tbody className="font-mono text-gray-700 dark:text-gray-300">
-                    {logs.map((log) => (
-                        <tr
-                            key={log.id}
-                            className="hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer"
-                            onClick={() => onLogClick(log)}
-                        >
-                            <td style={{ width: '60px' }}>
-                                <span className={`badge badge-xs text-white border-none ${log.status >= 200 && log.status < 400 ? 'badge-success' : 'badge-error'}`}>
-                                    {log.status}
-                                </span>
-                            </td>
-                            <td className="font-bold" style={{ width: '60px' }}>{log.method}</td>
-                            <td className="text-blue-600 truncate" style={{ width: '220px', maxWidth: '220px' }}>
-                                {log.mapped_model && log.model !== log.mapped_model
-                                    ? `${log.model} => ${log.mapped_model}`
-                                    : (log.model || '-')}
-                            </td>
-                            <td style={{ width: '70px' }}>
-                                {log.protocol && (
-                                    <span className={`badge badge-xs text-white border-none ${log.protocol === 'openai' ? 'bg-green-500' :
-                                        log.protocol === 'anthropic' ? 'bg-orange-500' :
-                                            log.protocol === 'gemini' ? 'bg-blue-500' : 'bg-gray-400'
-                                        }`}>
-                                        {log.protocol === 'openai' ? 'OpenAI' :
-                                            log.protocol === 'anthropic' ? 'Claude' :
-                                                log.protocol === 'gemini' ? 'Gemini' : log.protocol}
-                                    </span>
-                                )}
-                            </td>
-                            <td className="text-gray-600 dark:text-gray-400 truncate text-[10px]" style={{ width: '140px', maxWidth: '140px' }} title={log.account_email || ''}>
-                                {log.account_email ? log.account_email.replace(/(.{3}).*(@.*)/, '$1***$2') : '-'}
-                            </td>
-                            <td className="truncate" style={{ width: '180px', maxWidth: '180px' }}>{log.url}</td>
-                            <td className="text-right text-[9px]" style={{ width: '90px' }}>
-                                {log.input_tokens != null && <div>I: {formatCompactNumber(log.input_tokens)}</div>}
-                                {log.output_tokens != null && <div>O: {formatCompactNumber(log.output_tokens)}</div>}
-                            </td>
-                            <td className="text-right" style={{ width: '80px' }}>{log.duration}ms</td>
-                            <td className="text-right text-[10px]" style={{ width: '80px' }}>
-                                {new Date(log.timestamp).toLocaleTimeString()}
-                            </td>
+                    {paddingTop > 0 && (
+                        <tr>
+                            <td style={{ height: `${paddingTop}px` }} colSpan={9} />
                         </tr>
-                    ))}
+                    )}
+                    {virtualRows.map((virtualRow) => {
+                        const log = logs[virtualRow.index];
+                        return (
+                            <tr
+                                key={log.id}
+                                data-index={virtualRow.index}
+                                ref={rowVirtualizer.measureElement}
+                                className="hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer"
+                                onClick={() => onLogClick(log)}
+                            >
+                                <td style={{ width: '60px' }}>
+                                    <span className={`badge badge-xs text-white border-none ${log.status >= 200 && log.status < 400 ? 'badge-success' : 'badge-error'}`}>
+                                        {log.status}
+                                    </span>
+                                </td>
+                                <td className="font-bold" style={{ width: '60px' }}>{log.method}</td>
+                                <td className="text-blue-600 truncate" style={{ width: '220px', maxWidth: '220px' }}>
+                                    {log.mapped_model && log.model !== log.mapped_model
+                                        ? `${log.model} => ${log.mapped_model}`
+                                        : (log.model || '-')}
+                                </td>
+                                <td style={{ width: '70px' }}>
+                                    {log.protocol && (
+                                        <span className={`badge badge-xs text-white border-none ${log.protocol === 'openai' ? 'bg-green-500' :
+                                            log.protocol === 'anthropic' ? 'bg-orange-500' :
+                                                log.protocol === 'gemini' ? 'bg-blue-500' : 'bg-gray-400'
+                                            }`}>
+                                            {log.protocol === 'openai' ? 'OpenAI' :
+                                                log.protocol === 'anthropic' ? 'Claude' :
+                                                    log.protocol === 'gemini' ? 'Gemini' : log.protocol}
+                                        </span>
+                                    )}
+                                </td>
+                                <td className="text-gray-600 dark:text-gray-400 truncate text-[10px]" style={{ width: '140px', maxWidth: '140px' }} title={log.account_email || ''}>
+                                    {log.account_email ? log.account_email.replace(/(.{3}).*(@.*)/, '$1***$2') : '-'}
+                                </td>
+                                <td className="truncate" style={{ width: '180px', maxWidth: '180px' }}>{log.url}</td>
+                                <td className="text-right text-[9px]" style={{ width: '90px' }}>
+                                    {log.input_tokens != null && <div>I: {formatCompactNumber(log.input_tokens)}</div>}
+                                    {log.output_tokens != null && <div>O: {formatCompactNumber(log.output_tokens)}</div>}
+                                </td>
+                                <td className="text-right" style={{ width: '80px' }}>{log.duration}ms</td>
+                                <td className="text-right text-[10px]" style={{ width: '80px' }}>
+                                    {new Date(log.timestamp).toLocaleTimeString()}
+                                </td>
+                            </tr>
+                        );
+                    })}
+                    {paddingBottom > 0 && (
+                        <tr>
+                            <td style={{ height: `${paddingBottom}px` }} colSpan={9} />
+                        </tr>
+                    )}
                 </tbody>
             </table>
 
