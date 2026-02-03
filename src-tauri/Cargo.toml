@@ -71,5 +71,8 @@ tauri-plugin-window-state = "2"
 parking_lot = "0.12.5"
 serde_yaml = "0.9"  # YAML frontmatter parsing for skills
 
+[dev-dependencies]
+tempfile = "3"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"

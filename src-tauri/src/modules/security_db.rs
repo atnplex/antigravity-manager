@@ -70,7 +70,11 @@ pub fn get_security_db_path() -> Result<PathBuf, String> {
 
 /// 连接数据库
 fn connect_db() -> Result<Connection, String> {
-    let db_path = get_security_db_path()?;
+    let db_path = if let Ok(p) = std::env::var("TEST_SECURITY_DB_PATH") {
+        PathBuf::from(p)
+    } else {
+        get_security_db_path()?
+    };
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
 
     // Enable WAL mode for better concurrency
@@ -340,11 +344,38 @@ pub fn get_top_ips(limit: usize, hours: i64) -> Result<Vec<IpRanking>, String> {
         })
         .map_err(|e| e.to_string())?;
 
+    // Optimization: Fetch active blacklist once (reduces N+1 query problem)
+    let now = chrono::Utc::now().timestamp();
+    let mut bl_stmt = conn.prepare(
+        "SELECT ip_pattern FROM ip_blacklist WHERE expires_at IS NULL OR expires_at >= ?1"
+    ).map_err(|e| e.to_string())?;
+
+    // Split into exact and CIDR for faster matching
+    let mut exact_blacklist = std::collections::HashSet::new();
+    let mut cidr_blacklist = Vec::new();
+
+    let entries_iter = bl_stmt.query_map([now], |row| row.get::<_, String>(0)).map_err(|e| e.to_string())?;
+
+    for entry_res in entries_iter {
+        let pattern = entry_res.map_err(|e| e.to_string())?;
+        if pattern.contains('/') {
+            cidr_blacklist.push(pattern);
+        } else {
+            exact_blacklist.insert(pattern);
+        }
+    }
+
     let mut rankings = Vec::new();
     for r in rankings_iter {
         let mut ranking = r.map_err(|e| e.to_string())?;
-        // 检查是否在黑名单中
-        ranking.is_blocked = is_ip_in_blacklist(&ranking.client_ip)?;
+
+        // In-memory check
+        if exact_blacklist.contains(&ranking.client_ip) {
+            ranking.is_blocked = true;
+        } else {
+            ranking.is_blocked = cidr_blacklist.iter().any(|cidr| cidr_match(&ranking.client_ip, cidr));
+        }
+
         rankings.push(ranking);
     }
 
@@ -447,27 +478,41 @@ pub fn get_blacklist() -> Result<Vec<IpBlacklistEntry>, String> {
     Ok(entries)
 }
 
-/// 检查 IP 是否在黑名单中
+/// 检查 IP 是否在黑名单中 (纯检查，不更新命中计数，不清理过期条目)
 pub fn is_ip_in_blacklist(ip: &str) -> Result<bool, String> {
     get_blacklist_entry_for_ip(ip).map(|entry| entry.is_some())
 }
 
-/// 获取 IP 对应的黑名单条目（如果存在）
+/// 检查 IP 并更新命中计数（用于中间件/拦截）
+/// 会自动清理过期的黑名单条目，并增加命中计数
+pub fn check_and_update_blacklist_entry(ip: &str) -> Result<Option<IpBlacklistEntry>, String> {
+    find_blacklist_entry(ip, true)
+}
+
+/// 获取 IP 对应的黑名单条目（纯查询，不更新计数）
 pub fn get_blacklist_entry_for_ip(ip: &str) -> Result<Option<IpBlacklistEntry>, String> {
+    find_blacklist_entry(ip, false)
+}
+
+/// 内部通用查找逻辑
+fn find_blacklist_entry(ip: &str, update_stats: bool) -> Result<Option<IpBlacklistEntry>, String> {
     let conn = connect_db()?;
     let now = chrono::Utc::now().timestamp();
 
-    // 清理过期的黑名单条目
-    let _ = conn.execute(
-        "DELETE FROM ip_blacklist WHERE expires_at IS NOT NULL AND expires_at < ?1",
-        [now],
-    );
+    if update_stats {
+        // 清理过期的黑名单条目
+        let _ = conn.execute(
+            "DELETE FROM ip_blacklist WHERE expires_at IS NOT NULL AND expires_at < ?1",
+            [now],
+        );
+    }
 
-    // 精确匹配
+    // 精确匹配 (同时过滤过期，确保纯查询时也不会返回已过期的)
     let entry_result = conn.query_row(
         "SELECT id, ip_pattern, reason, created_at, expires_at, created_by, hit_count
-         FROM ip_blacklist WHERE ip_pattern = ?1",
-        [ip],
+         FROM ip_blacklist
+         WHERE ip_pattern = ?1 AND (expires_at IS NULL OR expires_at >= ?2)",
+        params![ip, now],
         |row| {
             Ok(IpBlacklistEntry {
                 id: row.get(0)?,
@@ -482,24 +527,47 @@ pub fn get_blacklist_entry_for_ip(ip: &str) -> Result<Option<IpBlacklistEntry>, 
     );
 
     if let Ok(entry) = entry_result {
-        // 增加命中计数
-        let _ = conn.execute(
-            "UPDATE ip_blacklist SET hit_count = hit_count + 1 WHERE ip_pattern = ?1",
-            [ip],
-        );
+        if update_stats {
+            // 增加命中计数
+            let _ = conn.execute(
+                "UPDATE ip_blacklist SET hit_count = hit_count + 1 WHERE id = ?1",
+                [&entry.id],
+            );
+        }
         return Ok(Some(entry));
     }
 
-    // CIDR 匹配
-    let entries = get_blacklist()?;
-    for entry in entries {
+    // CIDR 匹配 (需要过滤过期)
+    let mut stmt = conn.prepare(
+        "SELECT id, ip_pattern, reason, created_at, expires_at, created_by, hit_count
+         FROM ip_blacklist
+         WHERE expires_at IS NULL OR expires_at >= ?1
+         ORDER BY created_at DESC"
+    ).map_err(|e| e.to_string())?;
+
+    let entries_iter = stmt.query_map([now], |row| {
+        Ok(IpBlacklistEntry {
+            id: row.get(0)?,
+            ip_pattern: row.get(1)?,
+            reason: row.get(2)?,
+            created_at: row.get(3)?,
+            expires_at: row.get(4)?,
+            created_by: row.get(5)?,
+            hit_count: row.get(6)?,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    for e in entries_iter {
+        let entry = e.map_err(|e| e.to_string())?;
         if entry.ip_pattern.contains('/') {
             if cidr_match(ip, &entry.ip_pattern) {
-                // 增加命中计数
-                let _ = conn.execute(
-                    "UPDATE ip_blacklist SET hit_count = hit_count + 1 WHERE id = ?1",
-                    [&entry.id],
-                );
+                if update_stats {
+                    // 增加命中计数
+                    let _ = conn.execute(
+                        "UPDATE ip_blacklist SET hit_count = hit_count + 1 WHERE id = ?1",
+                        [&entry.id],
+                    );
+                }
                 return Ok(Some(entry));
             }
         }
@@ -677,4 +745,85 @@ pub fn get_ip_access_logs_count(ip_filter: Option<&str>, blocked_only: bool) -> 
         .map_err(|e| e.to_string())?;
 
     Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+    use std::fs;
+
+    #[test]
+    #[ignore]
+    fn bench_get_top_ips() {
+        // Setup
+        let db_path = "bench_security.db";
+        std::env::set_var("TEST_SECURITY_DB_PATH", db_path);
+
+        // Clean start
+        if std::path::Path::new(db_path).exists() {
+            let _ = fs::remove_file(db_path);
+        }
+
+        init_db().unwrap();
+
+        // Populate Blacklist
+        println!("Populating blacklist...");
+        let mut conn = connect_db().unwrap();
+        {
+            let tx = conn.transaction().unwrap();
+            // Insert 5000 entries
+            for i in 0..5000 {
+                let id = uuid::Uuid::new_v4().to_string();
+                let ip = format!("10.100.{}.{}", i / 256, i % 256);
+                let now = chrono::Utc::now().timestamp();
+                tx.execute(
+                    "INSERT INTO ip_blacklist (id, ip_pattern, created_at, created_by, hit_count) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![id, ip, now, "bench", 0],
+                ).unwrap();
+            }
+            // Add some CIDR
+            let now = chrono::Utc::now().timestamp();
+            tx.execute("INSERT INTO ip_blacklist (id, ip_pattern, created_at, created_by, hit_count) VALUES (?, ?, ?, ?, ?)",
+                params![uuid::Uuid::new_v4().to_string(), "192.168.0.0/16", now, "bench", 0]).unwrap();
+            tx.commit().unwrap();
+        }
+
+        // Populate Access Logs
+        println!("Populating access logs...");
+        {
+            let tx = conn.transaction().unwrap();
+            for i in 0..500 {
+                 let id = uuid::Uuid::new_v4().to_string();
+                 // Some IPs match blacklist, some don't
+                 let ip = if i % 10 == 0 {
+                     format!("10.100.0.{}", i) // Matches exact
+                 } else if i % 20 == 0 {
+                     format!("192.168.1.{}", i) // Matches CIDR
+                 } else {
+                     format!("1.1.1.{}", i) // No match
+                 };
+
+                 let now = chrono::Utc::now().timestamp();
+                 tx.execute(
+                    "INSERT INTO ip_access_logs (id, client_ip, timestamp, blocked) VALUES (?1, ?2, ?3, ?4)",
+                    params![id, ip, now, 0],
+                 ).unwrap();
+            }
+            tx.commit().unwrap();
+        }
+
+        // Benchmark
+        println!("Running get_top_ips...");
+        let start = Instant::now();
+        // Limit 100, last 24h
+        let rankings = get_top_ips(100, 24).unwrap();
+        let duration = start.elapsed();
+
+        println!("Time elapsed: {:?}", duration);
+        println!("Rankings found: {}", rankings.len());
+
+        // Cleanup
+        let _ = fs::remove_file(db_path);
+    }
 }
