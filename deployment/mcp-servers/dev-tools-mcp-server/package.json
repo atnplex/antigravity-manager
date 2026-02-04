@@ -8,7 +8,7 @@
     "dev-tools-mcp": "./index.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "prettier": "^3.0.0"
   },
   "engines": {
