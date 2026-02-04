@@ -62,17 +62,17 @@ impl TokenManager {
     /// Construct a safe account file path, validating the account_id to prevent path-injection.
     /// Returns an error if the account_id contains path traversal sequences or invalid characters.
     fn safe_account_path(&self, account_id: &str) -> Result<PathBuf, String> {
-        // Reject path traversal attempts
-        if account_id.contains("..") || account_id.contains('/') || account_id.contains('\\') {
-            return Err(format!("Invalid account_id: contains path components: {}", account_id));
+        // Reject path traversal attempts (check for '..' specifically)
+        if account_id.contains("..") {
+            return Err(format!("Invalid account_id: contains traversal components: {}", account_id));
         }
 
-        // Reject null bytes
-        if account_id.contains('\0') {
-            return Err("Invalid account_id: contains null bytes".to_string());
+        // Whitelist validation: allow only alphanumeric, -, _, ., @
+        if !account_id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '@') {
+            return Err(format!("Invalid account_id: contains invalid characters (allowed: alphanumeric, -, _, ., @): {}", account_id));
         }
 
-        // Reject empty account_id
+        // Check for empty
         if account_id.is_empty() {
             return Err("Invalid account_id: cannot be empty".to_string());
         }
