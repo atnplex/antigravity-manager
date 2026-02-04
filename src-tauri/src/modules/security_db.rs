@@ -4,6 +4,23 @@
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use r2d2::PooledConnection;
+use r2d2_sqlite::SqliteConnectionManager;
+use once_cell::sync::Lazy;
+
+type Pool = r2d2::Pool<SqliteConnectionManager>;
+
+static POOL: Lazy<Result<Pool, String>> = Lazy::new(|| {
+    let db_path = get_security_db_path()?;
+    let manager = SqliteConnectionManager::file(db_path)
+        .with_init(|c| {
+            c.pragma_update(None, "journal_mode", "WAL")?;
+            c.pragma_update(None, "busy_timeout", 5000)?;
+            c.pragma_update(None, "synchronous", "NORMAL")?;
+            Ok(())
+        });
+    r2d2::Pool::new(manager).map_err(|e| e.to_string())
+});
 
 /// IP 访问日志
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,22 +86,11 @@ pub fn get_security_db_path() -> Result<PathBuf, String> {
 }
 
 /// 连接数据库
-fn connect_db() -> Result<Connection, String> {
-    let db_path = get_security_db_path()?;
-    let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
-
-    // Enable WAL mode for better concurrency
-    conn.pragma_update(None, "journal_mode", "WAL")
-        .map_err(|e| e.to_string())?;
-
-    // Set busy timeout
-    conn.pragma_update(None, "busy_timeout", 5000)
-        .map_err(|e| e.to_string())?;
-
-    conn.pragma_update(None, "synchronous", "NORMAL")
-        .map_err(|e| e.to_string())?;
-
-    Ok(conn)
+fn connect_db() -> Result<PooledConnection<SqliteConnectionManager>, String> {
+    match &*POOL {
+        Ok(pool) => pool.get().map_err(|e| e.to_string()),
+        Err(e) => Err(format!("Database pool initialization failed: {}", e)),
+    }
 }
 
 /// 初始化安全数据库
