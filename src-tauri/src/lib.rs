@@ -417,6 +417,10 @@ pub fn run() {
             commands::security::check_ip_in_whitelist,
             commands::security::get_security_config,
             commands::security::update_security_config,
+            // Skills router commands
+            commands::skills::select_skills,
+            commands::skills::load_skill_content,
+            commands::skills::get_skill_stats,
             // Cloudflared commands
             commands::cloudflared::cloudflared_check,
             commands::cloudflared::cloudflared_install,
