@@ -662,7 +662,7 @@ export const ProxyMonitor: React.FC<ProxyMonitorProps> = ({ className }) => {
           </div>
 
           <button
-            onClick={() => loadData(currentPage, filter)}
+            onClick={() => loadData(currentPage, filter, accountFilter)}
             className="btn btn-sm btn-ghost text-gray-400"
             title={t("common.refresh")}
           >
