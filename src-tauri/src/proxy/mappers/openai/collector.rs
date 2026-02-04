@@ -78,7 +78,7 @@ where
                                 if let Some(r) = delta.get("role").and_then(|v| v.as_str()) {
                                     role = Some(r.to_string());
                                 }
-                                
+
                                 // Content
                                 if let Some(c) = delta.get("content").and_then(|v| v.as_str()) {
                                     content_parts.push(c.to_string());
@@ -136,9 +136,13 @@ where
     let tool_calls_vec = if !tool_call_builders.is_empty() {
         let mut calls = Vec::new();
         // BTreeMap iterates in sorted order of keys (indices), which is what we want
-        for (_, builder) in tool_call_builders {
+        for (index, builder) in tool_call_builders {
+            // Per OpenAI API spec, tool call ID is mandatory
+            let id = builder.id.ok_or_else(|| {
+                format!("Missing ID for tool call at index {}", index)
+            })?;
             calls.push(ToolCall {
-                id: builder.id.unwrap_or_default(),
+                id,
                 r#type: builder.r#type.unwrap_or_else(|| "function".to_string()),
                 function: ToolFunction {
                     name: builder.name,
