@@ -92,7 +92,7 @@ jobs:
 
       - name: Install Rust toolchain
         if: steps.rust-changes.outputs.changed == 'true'
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Initialize CodeQL
         if: steps.rust-changes.outputs.changed == 'true'
