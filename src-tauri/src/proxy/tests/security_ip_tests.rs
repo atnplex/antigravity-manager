@@ -13,7 +13,7 @@ mod security_db_tests {
     use crate::modules::security_db::{
         self, IpAccessLog, IpBlacklistEntry, IpWhitelistEntry,
         init_db, add_to_blacklist, remove_from_blacklist, get_blacklist,
-        is_ip_in_blacklist, get_blacklist_entry_for_ip,
+        is_ip_in_blacklist, get_blacklist_entry_for_ip, check_and_update_blacklist_entry,
         add_to_whitelist, remove_from_whitelist, get_whitelist,
         is_ip_in_whitelist, save_ip_access_log, get_ip_access_logs,
         get_ip_stats, cleanup_old_ip_logs, clear_ip_access_logs,
@@ -588,16 +588,16 @@ mod security_db_tests {
         cleanup_test_data();
 
         // 添加一个黑名单条目
-        let _ = add_to_blacklist("hit.count.test", Some("Count test"), None, "test");
+        add_to_blacklist("hit.count.test", Some("Count test"), None, "test").expect("Failed to add blacklist entry");
 
         // 多次查询应该增加 hit_count
         for _ in 0..5 {
-            let _ = get_blacklist_entry_for_ip("hit.count.test");
+            // use check_and_update_blacklist_entry to trigger hit count update
+            let _ = check_and_update_blacklist_entry("hit.count.test");
         }
 
         // 检查 hit_count
-        let blacklist = get_blacklist().unwrap();
-        let entry = blacklist.iter().find(|e| e.ip_pattern == "hit.count.test");
+        let entry = get_blacklist_entry_for_ip("hit.count.test").unwrap();
         assert!(entry.is_some());
         assert!(entry.unwrap().hit_count >= 5, "Hit count should be at least 5");
 
