@@ -92,13 +92,19 @@ jobs:
 
       - name: Install Rust toolchain
         if: steps.rust-changes.outputs.changed == 'true'
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Initialize CodeQL
         if: steps.rust-changes.outputs.changed == 'true'
         uses: github/codeql-action/init@v3
         with:
           languages: rust
+
+      - name: Install system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglib2.0-dev libgtk-3-dev libsoup2.4-dev libjavascriptcoregtk-4.0-dev libwebkit2gtk-4.0-dev
 
       - name: Build Rust (for CodeQL)
         if: steps.rust-changes.outputs.changed == 'true'
