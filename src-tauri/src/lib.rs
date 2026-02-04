@@ -66,6 +66,10 @@ pub fn run() {
         error!("Failed to initialize security database: {}", e);
     }
 
+    // Initialize chat database
+    if let Err(e) = modules::chat_db::init_db() {
+        error!("Failed to initialize chat database: {}", e);
+    }
 
     if is_headless {
         info!("Starting in HEADLESS mode...");
