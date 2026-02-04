@@ -225,10 +225,22 @@ impl AxumServer {
     }
 
     pub async fn update_user_agent(&self, config: &crate::proxy::config::ProxyConfig) {
+        // Update static override
         self.upstream
             .set_user_agent_override(config.user_agent_override.clone())
             .await;
-        tracing::info!("User-Agent 配置已热更新: {:?}", config.user_agent_override);
+
+        // Update rotation settings
+        self.upstream
+            .update_ua_rotation(config.user_agent_pool.clone(), config.ua_rotation_mode.clone())
+            .await;
+
+        tracing::info!(
+            "User-Agent 配置已热更新: override={:?}, rotation_mode={:?}, pool_size={}",
+            config.user_agent_override,
+            config.ua_rotation_mode,
+            config.user_agent_pool.len()
+        );
     }
 
     pub async fn set_running(&self, running: bool) {
@@ -1817,14 +1829,15 @@ async fn admin_get_update_settings() -> impl IntoResponse {
 }
 
 async fn admin_check_for_updates() -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
-    let info = crate::modules::update_checker::check_for_updates()
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse { error: e }),
-            )
-        })?;
+    // Hardened: Immediate no-op return to prevent any upstream check
+    let info = crate::modules::update_checker::UpdateInfo {
+        has_update: false,
+        latest_version: crate::constants::FALLBACK_VERSION.to_string(),
+        current_version: crate::constants::FALLBACK_VERSION.to_string(),
+        download_url: "".to_string(),
+        release_notes: "".to_string(),
+        published_at: "".to_string(),
+    };
     Ok(Json(info))
 }
 

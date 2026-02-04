@@ -59,6 +59,37 @@ impl TokenManager {
         }
     }
 
+    /// Construct a safe account file path, validating the account_id to prevent path-injection.
+    /// Returns an error if the account_id contains path traversal sequences or invalid characters.
+    fn safe_account_path(&self, account_id: &str) -> Result<PathBuf, String> {
+        // Reject path traversal attempts
+        if account_id.contains("..") || account_id.contains('/') || account_id.contains('\\') {
+            return Err(format!("Invalid account_id: contains path components: {}", account_id));
+        }
+
+        // Reject null bytes
+        if account_id.contains('\0') {
+            return Err("Invalid account_id: contains null bytes".to_string());
+        }
+
+        // Reject empty account_id
+        if account_id.is_empty() {
+            return Err("Invalid account_id: cannot be empty".to_string());
+        }
+
+        let path = self.data_dir.join("accounts").join(format!("{}.json", account_id));
+
+        // Additional validation: ensure the constructed path is within accounts directory
+        let accounts_dir = self.data_dir.join("accounts");
+        if let (Ok(canonical_accounts), Ok(canonical_path)) = (accounts_dir.canonicalize(), path.parent().map(|p| p.canonicalize()).unwrap_or(Ok(PathBuf::new()))) {
+            if !canonical_path.starts_with(&canonical_accounts) {
+                return Err(format!("Path escapes accounts directory: {:?}", path));
+            }
+        }
+
+        Ok(path)
+    }
+
     /// 启动限流记录自动清理后台任务（每15秒检查并清除过期记录）
     pub fn start_auto_cleanup(&self) {
         let tracker = self.rate_limit_tracker.clone();
@@ -107,11 +138,16 @@ impl TokenManager {
                 continue;
             }
 
+            let account_id = path.file_stem()
+                .and_then(|s| s.to_str())
+                .ok_or_else(|| format!("Invalid filename: {:?}", path))?
+                .to_string();
+
             // 尝试加载账号
-            match self.load_single_account(&path).await {
+            match self.load_single_account(&account_id).await {
                 Ok(Some(token)) => {
-                    let account_id = token.account_id.clone();
-                    self.tokens.insert(account_id, token);
+                    let token_id = token.account_id.clone();
+                    self.tokens.insert(token_id, token);
                     count += 1;
                 }
                 Ok(None) => {
@@ -128,15 +164,8 @@ impl TokenManager {
 
     /// 重新加载指定账号（用于配额更新后的实时同步）
     pub async fn reload_account(&self, account_id: &str) -> Result<(), String> {
-        let path = self
-            .data_dir
-            .join("accounts")
-            .join(format!("{}.json", account_id));
-        if !path.exists() {
-            return Err(format!("账号文件不存在: {:?}", path));
-        }
-
-        match self.load_single_account(&path).await {
+        // Validation happens inside load_single_account via safe_account_path
+        match self.load_single_account(account_id).await {
             Ok(Some(token)) => {
                 self.tokens.insert(account_id.to_string(), token);
                 // [NEW] 重新加载账号时自动清除该账号的限流记录
@@ -156,9 +185,16 @@ impl TokenManager {
         Ok(count)
     }
 
-    /// 加载单个账号
-    async fn load_single_account(&self, path: &PathBuf) -> Result<Option<ProxyToken>, String> {
-        let content = std::fs::read_to_string(path)
+    /// 加载单个账号 (By ID, forcing safe path construction)
+    async fn load_single_account(&self, account_id: &str) -> Result<Option<ProxyToken>, String> {
+        // [Security] Always construct path safely from ID inside the function
+        let path = self.safe_account_path(account_id)?;
+
+        if !path.exists() {
+            return Err(format!("Account file not found: {:?}", path));
+        }
+
+        let content = std::fs::read_to_string(&path)
             .map_err(|e| format!("读取文件失败: {}", e))?;
 
         let mut account: serde_json::Value = serde_json::from_str(&content)
@@ -253,9 +289,11 @@ impl TokenManager {
                 account["validation_blocked_until"] = serde_json::Value::Null;
                 account["validation_blocked_reason"] = serde_json::Value::Null;
 
-                // Save cleared state
+                // Save cleared state (use validated_path to prevent path-injection)
                 if let Ok(json_str) = serde_json::to_string_pretty(&account) {
-                    let _ = std::fs::write(path, json_str);
+                    if let Err(e) = std::fs::write(&validated_path, json_str) {
+                         tracing::warn!("Failed to save cleared validation block for {:?}: {}", &validated_path, e);
+                    }
                 }
             }
         }
@@ -1273,9 +1311,7 @@ impl TokenManager {
         let path = if let Some(entry) = self.tokens.get(account_id) {
             entry.account_path.clone()
         } else {
-            self.data_dir
-                .join("accounts")
-                .join(format!("{}.json", account_id))
+            self.safe_account_path(account_id)?
         };
 
         let mut content: serde_json::Value = serde_json::from_str(
@@ -1589,8 +1625,8 @@ impl TokenManager {
     /// # 参数
     /// - `account_id`: 账号 ID（用于查找账号文件）
     pub fn get_quota_reset_time(&self, account_id: &str) -> Option<String> {
-        // 直接用 account_id 查找账号文件（文件名是 {account_id}.json）
-        let account_path = self.data_dir.join("accounts").join(format!("{}.json", account_id));
+        // Use safe_account_path to prevent path-injection
+        let account_path = self.safe_account_path(account_id).ok()?;
 
         let content = std::fs::read_to_string(&account_path).ok()?;
         let account: serde_json::Value = serde_json::from_str(&content).ok()?;
@@ -2021,8 +2057,8 @@ impl TokenManager {
              token.validation_blocked_until = block_until;
         }
 
-        // 2. Persist to disk
-        let path = self.data_dir.join("accounts").join(format!("{}.json", account_id));
+        // 2. Persist to disk (use safe_account_path to prevent path-injection)
+        let path = self.safe_account_path(account_id)?;
         if !path.exists() {
              return Err(format!("Account file not found: {:?}", path));
         }
@@ -2098,6 +2134,8 @@ mod tests {
             protected_models: HashSet::new(),
             health_score,
             reset_time,
+            validation_blocked: false,
+            validation_blocked_until: 0,
         }
     }
 

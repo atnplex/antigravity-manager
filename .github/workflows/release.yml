@@ -107,16 +107,16 @@ jobs:
         run: |
           echo "Merging updater.json files..."
           echo "{}" > merged_updater.json
-          
+
           # 查找所有下载下来的 json 并合并
           find all-updaters -name "*.json" -type f | while read json_file; do
             echo "Processing $json_file..."
             jq -s '.[0] * .[1]' merged_updater.json "$json_file" > temp.json && mv temp.json merged_updater.json
           done
-          
+
           echo "Merged JSON content:"
           cat merged_updater.json
-          
+
           mv merged_updater.json updater.json
 
       - name: Upload merged updater.json

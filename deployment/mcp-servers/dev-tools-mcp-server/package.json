@@ -1,0 +1,17 @@
+{
+  "name": "dev-tools-mcp-server",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Development tools MCP server - formatters, linters, code quality",
+  "main": "index.js",
+  "bin": {
+    "dev-tools-mcp": "./index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "prettier": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

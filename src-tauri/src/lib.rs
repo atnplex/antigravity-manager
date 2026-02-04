@@ -66,6 +66,10 @@ pub fn run() {
         error!("Failed to initialize security database: {}", e);
     }
 
+    // Initialize chat database
+    if let Err(e) = modules::chat_db::init_db() {
+        error!("Failed to initialize chat database: {}", e);
+    }
 
     if is_headless {
         info!("Starting in HEADLESS mode...");
@@ -79,8 +83,14 @@ pub fn run() {
             // Load config
             match modules::config::load_app_config() {
                 Ok(mut config) => {
-                    // Force LAN access in headless/docker mode so it binds to 0.0.0.0
-                    config.proxy.allow_lan_access = true;
+                    // Hardened: Do NOT force LAN access in headless mode. Default to localhost for security.
+                    // Requirement: explicit opt-in env var ALLOW_LAN=1 to bind 0.0.0.0
+                    if std::env::var("ALLOW_LAN").ok().as_deref() == Some("1") {
+                        config.proxy.allow_lan_access = true;
+                        info!("Headless mode with ALLOW_LAN=1: enabling 0.0.0.0 binding.");
+                    } else {
+                        info!("Headless mode: defaulting to localhost binding (secure). Set ALLOW_LAN=1 to bind 0.0.0.0.");
+                    }
 
                     // [NEW] 支持通过环境变量注入 API Key
                     // 优先级：ABV_API_KEY > API_KEY > 配置文件
@@ -182,7 +192,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--minimized"]),
         ))
-        .plugin(tauri_plugin_updater::Builder::new().build())
+
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
