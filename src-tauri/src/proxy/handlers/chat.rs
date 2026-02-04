@@ -148,29 +148,32 @@ async fn handle_client_message(msg: ClientMessage, _state: &AppState) -> ServerM
             }
         }
         ClientMessage::ListSessions => {
-            // TODO: Query database for sessions
-            debug!("Listing sessions");
+            debug!("Listing sessions from database");
 
-            // Mock response
-            ServerMessage::SessionList {
-                sessions: vec![
-                    TaskSessionResponse {
-                        id: "mock-session-1".to_string(),
-                        title: "Fix Docker Networking".to_string(),
-                        repo_name: "atnplex/homelab".to_string(),
-                        branch_name: None,
-                        status: "running".to_string(),
-                        created_at: chrono::Utc::now().timestamp() - 3600,
-                    },
-                    TaskSessionResponse {
-                        id: "mock-session-2".to_string(),
-                        title: "Audit Secrets".to_string(),
-                        repo_name: "atnplex/antigravity-manager".to_string(),
-                        branch_name: Some("main".to_string()),
-                        status: "completed".to_string(),
-                        created_at: chrono::Utc::now().timestamp() - 7200,
-                    },
-                ],
+            match crate::modules::chat_db::list_sessions() {
+                Ok(sessions) => {
+                    let response_sessions = sessions
+                        .into_iter()
+                        .map(|s| TaskSessionResponse {
+                            id: s.id,
+                            title: s.title,
+                            repo_name: s.repo_name,
+                            branch_name: s.branch_name,
+                            status: s.status,
+                            created_at: s.created_at,
+                        })
+                        .collect();
+
+                    ServerMessage::SessionList {
+                        sessions: response_sessions,
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to list sessions: {}", e);
+                    ServerMessage::Error {
+                        message: format!("Database error: {}", e),
+                    }
+                }
             }
         }
         ClientMessage::LoadSession { session_id } => {
