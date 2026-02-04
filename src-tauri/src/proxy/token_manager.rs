@@ -674,7 +674,6 @@ impl TokenManager {
         model_name: &str,
     ) -> Result<bool, String> {
         // Validate path to prevent path-injection
-        // Validate path to prevent path-injection
         // [Security Fix] Always reconstruct path from trusted account_id
         let account_path = self.safe_account_path(account_id)?;
 
