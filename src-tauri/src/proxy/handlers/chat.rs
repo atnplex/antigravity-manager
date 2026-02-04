@@ -12,7 +12,6 @@ use std::sync::Arc;
 use tracing::{debug, error, info};
 
 use crate::proxy::server::AppState;
-use crate::modules::chat_db;
 
 // Client -> Server messages
 #[derive(Debug, Deserialize)]
@@ -63,36 +62,12 @@ struct TaskSessionResponse {
     created_at: i64,
 }
 
-impl From<chat_db::ChatSession> for TaskSessionResponse {
-    fn from(s: chat_db::ChatSession) -> Self {
-        Self {
-            id: s.id,
-            title: s.title,
-            repo_name: s.repo_name,
-            branch_name: s.branch_name,
-            status: s.status,
-            created_at: s.created_at,
-        }
-    }
-}
-
 #[derive(Debug, Serialize, Clone)]
 struct TaskMessageResponse {
     id: i64,
     role: String,
     content: String,
     created_at: i64,
-}
-
-impl From<chat_db::ChatMessage> for TaskMessageResponse {
-    fn from(m: chat_db::ChatMessage) -> Self {
-        Self {
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            created_at: m.created_at,
-        }
-    }
 }
 
 /// WebSocket handler endpoint
@@ -157,94 +132,93 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 async fn handle_client_message(msg: ClientMessage, _state: &AppState) -> ServerMessage {
     match msg {
         ClientMessage::CreateSession { title, repo, branch } => {
+            // TODO: Create session in database
             debug!("Creating session: {} for repo {}", title, repo);
-            let result = tokio::task::spawn_blocking(move || {
-                chat_db::create_session(title, repo, branch)
-            }).await;
 
-            match result {
-                Ok(Ok(_session)) => {
-                    // Fetch updated list
-                    let list_result = tokio::task::spawn_blocking(|| {
-                        chat_db::list_sessions()
-                    }).await;
-
-                     match list_result {
-                        Ok(Ok(sessions)) => ServerMessage::SessionList {
-                            sessions: sessions.into_iter().map(TaskSessionResponse::from).collect(),
-                        },
-                        Ok(Err(e)) => ServerMessage::Error { message: e },
-                         Err(e) => ServerMessage::Error { message: e.to_string() },
-                    }
-                },
-                Ok(Err(e)) => ServerMessage::Error { message: e },
-                Err(e) => ServerMessage::Error { message: e.to_string() },
+            // Mock response for now
+            ServerMessage::SessionList {
+                sessions: vec![TaskSessionResponse {
+                    id: "mock-session-1".to_string(),
+                    title,
+                    repo_name: repo,
+                    branch_name: branch,
+                    status: "pending".to_string(),
+                    created_at: chrono::Utc::now().timestamp(),
+                }],
             }
         }
         ClientMessage::ListSessions => {
-            debug!("Listing sessions");
-            let result = tokio::task::spawn_blocking(|| {
-                chat_db::list_sessions()
-            }).await;
+            debug!("Listing sessions from database");
 
-            match result {
-                Ok(Ok(sessions)) => ServerMessage::SessionList {
-                    sessions: sessions.into_iter().map(TaskSessionResponse::from).collect(),
-                },
-                Ok(Err(e)) => ServerMessage::Error { message: e },
-                Err(e) => ServerMessage::Error { message: e.to_string() },
+            match crate::modules::chat_db::list_sessions() {
+                Ok(sessions) => {
+                    let response_sessions = sessions
+                        .into_iter()
+                        .map(|s| TaskSessionResponse {
+                            id: s.id,
+                            title: s.title,
+                            repo_name: s.repo_name,
+                            branch_name: s.branch_name,
+                            status: s.status,
+                            created_at: s.created_at,
+                        })
+                        .collect();
+
+                    ServerMessage::SessionList {
+                        sessions: response_sessions,
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to list sessions: {}", e);
+                    ServerMessage::Error {
+                        message: format!("Database error: {}", e),
+                    }
+                }
             }
         }
         ClientMessage::LoadSession { session_id } => {
+            // TODO: Load session and messages from database
             debug!("Loading session: {}", session_id);
-            let sid = session_id.clone();
 
-            let result = tokio::task::spawn_blocking(move || {
-                let session = chat_db::get_session(&sid)?;
-                let messages = chat_db::get_messages(&sid)?;
-                Ok((session, messages))
-            }).await;
-
-            match result {
-                Ok(Ok((session, messages))) => ServerMessage::SessionLoaded {
-                    session: TaskSessionResponse::from(session),
-                    messages: messages.into_iter().map(TaskMessageResponse::from).collect(),
+            // Mock response
+            ServerMessage::SessionLoaded {
+                session: TaskSessionResponse {
+                    id: session_id.clone(),
+                    title: "Mock Session".to_string(),
+                    repo_name: "atnplex/mock-repo".to_string(),
+                    branch_name: None,
+                    status: "running".to_string(),
+                    created_at: chrono::Utc::now().timestamp(),
                 },
-                Ok(Err(e)) => ServerMessage::Error { message: e },
-                Err(e) => ServerMessage::Error { message: e.to_string() },
+                messages: vec![
+                    TaskMessageResponse {
+                        id: 1,
+                        role: "user".to_string(),
+                        content: "Hello, start working on this task".to_string(),
+                        created_at: chrono::Utc::now().timestamp() - 120,
+                    },
+                    TaskMessageResponse {
+                        id: 2,
+                        role: "assistant".to_string(),
+                        content: "I understand. I'll begin working on this task right away.".to_string(),
+                        created_at: chrono::Utc::now().timestamp() - 60,
+                    },
+                ],
             }
         }
         ClientMessage::UserMessage { session_id, content } => {
+            // TODO: Save message to database and trigger agent processing
             info!("User message in session {}: {}", session_id, content);
-            let sid = session_id.clone();
-            let c = content.clone();
 
-            // Save user message
-            let result = tokio::task::spawn_blocking(move || {
-                chat_db::add_message(&sid, "user", &c)
-            }).await;
-
-            match result {
-                Ok(Ok(_user_msg)) => {
-                    // Mock agent response
-                    let sid2 = session_id.clone();
-                    let response_content = format!("Echo: {} (Backend WebSocket is working!)", content);
-
-                    let assistant_msg_result = tokio::task::spawn_blocking(move || {
-                        chat_db::add_message(&sid2, "assistant", &response_content)
-                    }).await;
-
-                    match assistant_msg_result {
-                        Ok(Ok(assistant_msg)) => ServerMessage::MessageAppended {
-                            session_id,
-                            message: TaskMessageResponse::from(assistant_msg),
-                        },
-                         Ok(Err(e)) => ServerMessage::Error { message: e },
-                         Err(e) => ServerMessage::Error { message: e.to_string() },
-                    }
+            // Mock echo response
+            ServerMessage::MessageAppended {
+                session_id: session_id.clone(),
+                message: TaskMessageResponse {
+                    id: chrono::Utc::now().timestamp(),
+                    role: "assistant".to_string(),
+                    content: format!("Echo: {} (Backend WebSocket is working!)", content),
+                    created_at: chrono::Utc::now().timestamp(),
                 },
-                Ok(Err(e)) => ServerMessage::Error { message: e },
-                Err(e) => ServerMessage::Error { message: e.to_string() },
             }
         }
     }
