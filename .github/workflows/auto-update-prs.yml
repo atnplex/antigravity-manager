@@ -1,0 +1,73 @@
+# Auto-Update PRs GitHub Action
+#
+# Automatically updates all open PRs when main changes,
+# keeping them up-to-date and ready for auto-merge.
+
+name: Auto-Update PRs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (log only, no updates)"
+        required: false
+        default: "false"
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-prs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Update all open PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        run: |
+          set -euo pipefail
+
+          echo "🔄 Fetching open PRs..."
+          prs=$(gh pr list --state open --json number,title,headRefName --jq '.[] | "\(.number)|\(.title)|\(.headRefName)"')
+
+          if [[ -z "$prs" ]]; then
+            echo "✅ No open PRs to update"
+            exit 0
+          fi
+
+          echo "📋 Found PRs to update:"
+          echo "$prs" | while IFS='|' read -r number title branch; do
+            echo "  - #$number: $title ($branch)"
+          done
+
+          echo ""
+          echo "🔄 Updating PRs..."
+
+          echo "$prs" | while IFS='|' read -r number title branch; do
+            echo "→ Updating PR #$number: $title"
+
+            if [[ "$DRY_RUN" == "true" ]]; then
+              echo "  [DRY RUN] Would update branch"
+              continue
+            fi
+
+            if gh pr update-branch "$number" --rebase 2>&1; then
+              echo "  ✅ Updated successfully"
+            else
+              if gh pr update-branch "$number" 2>&1; then
+                echo "  ✅ Updated via merge"
+              else
+                echo "  ⚠️ Could not update (may already be up-to-date or has conflicts)"
+              fi
+            fi
+          done
+
+          echo ""
+          echo "✅ PR update complete"
