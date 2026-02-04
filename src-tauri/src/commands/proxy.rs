@@ -372,10 +372,14 @@ pub async fn get_proxy_logs_paginated(
     limit: Option<usize>,
     offset: Option<usize>,
 ) -> Result<Vec<ProxyRequestLog>, String> {
-    crate::modules::proxy_db::get_logs_summary(
-        limit.unwrap_or(20),
-        offset.unwrap_or(0)
-    )
+    let limit = limit.unwrap_or(20);
+    let offset = offset.unwrap_or(0);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::modules::proxy_db::get_logs_summary(limit, offset)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 /// 获取单条日志的完整详情
