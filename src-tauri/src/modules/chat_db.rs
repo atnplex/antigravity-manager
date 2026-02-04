@@ -34,6 +34,8 @@ fn connect_db() -> Result<Connection, String> {
     conn.pragma_update(None, "journal_mode", "WAL").map_err(|e| e.to_string())?;
     conn.pragma_update(None, "busy_timeout", 5000).map_err(|e| e.to_string())?;
     conn.pragma_update(None, "synchronous", "NORMAL").map_err(|e| e.to_string())?;
+    // Enable foreign key constraint enforcement (required for CASCADE to work)
+    conn.pragma_update(None, "foreign_keys", "ON").map_err(|e| e.to_string())?;
 
     Ok(conn)
 }
