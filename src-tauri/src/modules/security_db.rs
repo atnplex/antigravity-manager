@@ -210,49 +210,67 @@ pub fn get_ip_access_logs(
 ) -> Result<Vec<IpAccessLog>, String> {
     let conn = connect_db()?;
 
-    let sql = if blocked_only {
-        if let Some(ip) = ip_filter {
-            format!(
+    // Build query with parameterized placeholders to prevent SQL injection
+    let (sql, params): (String, Vec<Box<dyn rusqlite::ToSql>>) = match (blocked_only, ip_filter) {
+        (true, Some(ip)) => {
+            let like_pattern = format!("%{}%", ip);
+            (
                 "SELECT id, client_ip, timestamp, method, path, user_agent, status, duration, api_key_hash, blocked, block_reason
                  FROM ip_access_logs
-                 WHERE blocked = 1 AND client_ip LIKE '%{}%'
+                 WHERE blocked = 1 AND client_ip LIKE ?1
                  ORDER BY timestamp DESC
-                 LIMIT {} OFFSET {}",
-                ip, limit, offset
-            )
-        } else {
-            format!(
-                "SELECT id, client_ip, timestamp, method, path, user_agent, status, duration, api_key_hash, blocked, block_reason
-                 FROM ip_access_logs
-                 WHERE blocked = 1
-                 ORDER BY timestamp DESC
-                 LIMIT {} OFFSET {}",
-                limit, offset
+                 LIMIT ?2 OFFSET ?3".to_string(),
+                vec![
+                    Box::new(like_pattern) as Box<dyn rusqlite::ToSql>,
+                    Box::new(limit as i64),
+                    Box::new(offset as i64),
+                ],
             )
         }
-    } else if let Some(ip) = ip_filter {
-        format!(
+        (true, None) => (
             "SELECT id, client_ip, timestamp, method, path, user_agent, status, duration, api_key_hash, blocked, block_reason
              FROM ip_access_logs
-             WHERE client_ip LIKE '%{}%'
+             WHERE blocked = 1
              ORDER BY timestamp DESC
-             LIMIT {} OFFSET {}",
-            ip, limit, offset
-        )
-    } else {
-        format!(
+             LIMIT ?1 OFFSET ?2".to_string(),
+            vec![
+                Box::new(limit as i64) as Box<dyn rusqlite::ToSql>,
+                Box::new(offset as i64),
+            ],
+        ),
+        (false, Some(ip)) => {
+            let like_pattern = format!("%{}%", ip);
+            (
+                "SELECT id, client_ip, timestamp, method, path, user_agent, status, duration, api_key_hash, blocked, block_reason
+                 FROM ip_access_logs
+                 WHERE client_ip LIKE ?1
+                 ORDER BY timestamp DESC
+                 LIMIT ?2 OFFSET ?3".to_string(),
+                vec![
+                    Box::new(like_pattern) as Box<dyn rusqlite::ToSql>,
+                    Box::new(limit as i64),
+                    Box::new(offset as i64),
+                ],
+            )
+        }
+        (false, None) => (
             "SELECT id, client_ip, timestamp, method, path, user_agent, status, duration, api_key_hash, blocked, block_reason
              FROM ip_access_logs
              ORDER BY timestamp DESC
-             LIMIT {} OFFSET {}",
-            limit, offset
-        )
+             LIMIT ?1 OFFSET ?2".to_string(),
+            vec![
+                Box::new(limit as i64) as Box<dyn rusqlite::ToSql>,
+                Box::new(offset as i64),
+            ],
+        ),
     };
 
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
+    let params_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+
     let logs_iter = stmt
-        .query_map([], |row| {
+        .query_map(params_refs.as_slice(), |row| {
             Ok(IpAccessLog {
                 id: row.get(0)?,
                 client_ip: row.get(1)?,
@@ -660,27 +678,37 @@ pub fn clear_ip_access_logs() -> Result<(), String> {
 pub fn get_ip_access_logs_count(ip_filter: Option<&str>, blocked_only: bool) -> Result<u64, String> {
     let conn = connect_db()?;
 
-    let sql = if blocked_only {
-        if let Some(ip) = ip_filter {
-            format!(
-                "SELECT COUNT(*) FROM ip_access_logs WHERE blocked = 1 AND client_ip LIKE '%{}%'",
-                ip
+    // Use parameterized queries to prevent SQL injection
+    let count: u64 = match (blocked_only, ip_filter) {
+        (true, Some(ip)) => {
+            let like_pattern = format!("%{}%", ip);
+            conn.query_row(
+                "SELECT COUNT(*) FROM ip_access_logs WHERE blocked = 1 AND client_ip LIKE ?1",
+                [&like_pattern],
+                |row| row.get(0),
             )
-        } else {
-            "SELECT COUNT(*) FROM ip_access_logs WHERE blocked = 1".to_string()
+            .map_err(|e| e.to_string())?
         }
-    } else if let Some(ip) = ip_filter {
-        format!(
-            "SELECT COUNT(*) FROM ip_access_logs WHERE client_ip LIKE '%{}%'",
-            ip
-        )
-    } else {
-        "SELECT COUNT(*) FROM ip_access_logs".to_string()
+        (true, None) => conn
+            .query_row(
+                "SELECT COUNT(*) FROM ip_access_logs WHERE blocked = 1",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?,
+        (false, Some(ip)) => {
+            let like_pattern = format!("%{}%", ip);
+            conn.query_row(
+                "SELECT COUNT(*) FROM ip_access_logs WHERE client_ip LIKE ?1",
+                [&like_pattern],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?
+        }
+        (false, None) => conn
+            .query_row("SELECT COUNT(*) FROM ip_access_logs", [], |row| row.get(0))
+            .map_err(|e| e.to_string())?,
     };
-
-    let count: u64 = conn
-        .query_row(&sql, [], |row| row.get(0))
-        .map_err(|e| e.to_string())?;
 
     Ok(count)
 }
