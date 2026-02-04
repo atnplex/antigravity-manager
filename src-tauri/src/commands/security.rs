@@ -47,13 +47,20 @@ pub async fn get_ip_access_logs(
     query: IpAccessLogQuery,
 ) -> Result<IpAccessLogResponse, String> {
     let offset = (query.page.max(1) - 1) * query.page_size;
+    let page_size = query.page_size;
+    let search = query.search;
+    let blocked_only = query.blocked_only;
     
-    let logs = security_db::get_ip_access_logs(
-        query.page_size,
-        offset,
-        query.search.as_deref(),
-        query.blocked_only,
-    )?;
+    let logs = tauri::async_runtime::spawn_blocking(move || {
+        security_db::get_ip_access_logs(
+            page_size,
+            offset,
+            search.as_deref(),
+            blocked_only,
+        )
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))??;
     
     // 简单计算总数 (如果需要精确分页,可以添加 count 函数)
     let total = logs.len();

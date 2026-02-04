@@ -2,7 +2,7 @@ use crate::models::AppConfig;
 use crate::modules::{account, config, logger, migration, proxy_db, token_stats};
 use crate::proxy::TokenManager;
 use axum::{
-    extract::{DefaultBodyLimit, Path, Query, State},
+    extract::{DefaultBodyLimit, Path, Query, State, ws::{WebSocket, WebSocketUpgrade, Message}},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Json, Response},
     routing::{any, delete, get, post},
@@ -225,10 +225,22 @@ impl AxumServer {
     }
 
     pub async fn update_user_agent(&self, config: &crate::proxy::config::ProxyConfig) {
+        // Update static override
         self.upstream
             .set_user_agent_override(config.user_agent_override.clone())
             .await;
-        tracing::info!("User-Agent 配置已热更新: {:?}", config.user_agent_override);
+
+        // Update rotation settings
+        self.upstream
+            .update_ua_rotation(config.user_agent_pool.clone(), config.ua_rotation_mode.clone())
+            .await;
+
+        tracing::info!(
+            "User-Agent 配置已热更新: override={:?}, rotation_mode={:?}, pool_size={}",
+            config.user_agent_override,
+            config.ua_rotation_mode,
+            config.user_agent_pool.len()
+        );
     }
 
     pub async fn set_running(&self, running: bool) {
@@ -541,6 +553,8 @@ impl AxumServer {
             )
             .route("/system/antigravity/path", get(admin_get_antigravity_path))
             .route("/system/antigravity/args", get(admin_get_antigravity_args))
+            // WebSocket endpoints
+            .route("/ws/realtime", get(ws_handler))
             // OAuth (Web) - Admin 接口
             .route("/auth/url", get(admin_prepare_oauth_url_web))
             // 应用管理特定鉴权层 (强制校验)
@@ -2710,5 +2724,34 @@ fn get_oauth_redirect_uri(port: u16, _host: Option<&str>, _proto: Option<&str>) 
     } else {
         // 强制返回 localhost。远程部署时，用户可通过回填功能完成授权。
         format!("http://localhost:{}/auth/callback", port)
+    }
+}
+
+// ============================================================================
+// WebSocket Handlers for Real-time Stats
+// ============================================================================
+
+/// WebSocket handler for real-time stats streaming
+pub async fn ws_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+) -> Response {
+    ws.on_upgrade(move |socket| handle_socket(socket, state))
+}
+
+async fn handle_socket(mut socket: WebSocket, state: AppState) {
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+    loop {
+        interval.tick().await;
+        let stats = state.monitor.get_stats().await;
+        if socket
+            .send(Message::Text(
+                serde_json::to_string(&stats).unwrap_or_else(|_| "{}".to_string()),
+            ))
+            .await
+            .is_err()
+        {
+            break;
+        }
     }
 }

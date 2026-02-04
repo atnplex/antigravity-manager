@@ -10,6 +10,7 @@ import CurrentAccount from '../components/dashboard/CurrentAccount';
 import { exportAccounts } from '../services/accountService';
 import { useAccountStore } from '../stores/useAccountStore';
 import { Account } from '../types/account';
+import { calculateDashboardStats } from '../utils/dashboardUtils';
 import { isTauri } from '../utils/env';
 import { request as invoke } from '../utils/request';
 
@@ -33,40 +34,7 @@ function Dashboard() {
     }, []);
 
     // 计算统计数据
-    const stats = useMemo(() => {
-        const geminiQuotas = accounts
-            .map(a => a.quota?.models.find(m => m.name.toLowerCase() === 'gemini-3-pro-high')?.percentage || 0)
-            .filter(q => q > 0);
-
-        const geminiImageQuotas = accounts
-            .map(a => a.quota?.models.find(m => m.name.toLowerCase() === 'gemini-3-pro-image')?.percentage || 0)
-            .filter(q => q > 0);
-
-        const claudeQuotas = accounts
-            .map(a => a.quota?.models.find(m => m.name.toLowerCase() === 'claude-sonnet-4-5')?.percentage || 0)
-            .filter(q => q > 0);
-
-        const lowQuotaCount = accounts.filter(a => {
-            if (a.quota?.is_forbidden) return false;
-            const gemini = a.quota?.models.find(m => m.name.toLowerCase() === 'gemini-3-pro-high')?.percentage || 0;
-            const claude = a.quota?.models.find(m => m.name.toLowerCase() === 'claude-sonnet-4-5')?.percentage || 0;
-            return gemini < 20 || claude < 20;
-        }).length;
-
-        return {
-            total: accounts.length,
-            avgGemini: geminiQuotas.length > 0
-                ? Math.round(geminiQuotas.reduce((a, b) => a + b, 0) / geminiQuotas.length)
-                : 0,
-            avgGeminiImage: geminiImageQuotas.length > 0
-                ? Math.round(geminiImageQuotas.reduce((a, b) => a + b, 0) / geminiImageQuotas.length)
-                : 0,
-            avgClaude: claudeQuotas.length > 0
-                ? Math.round(claudeQuotas.reduce((a, b) => a + b, 0) / claudeQuotas.length)
-                : 0,
-            lowQuota: lowQuotaCount,
-        };
-    }, [accounts]);
+    const stats = useMemo(() => calculateDashboardStats(accounts), [accounts]);
 
     const isSwitchingRef = useRef(false);
 

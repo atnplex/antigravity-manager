@@ -138,11 +138,16 @@ impl TokenManager {
                 continue;
             }
 
+            let account_id = path.file_stem()
+                .and_then(|s| s.to_str())
+                .ok_or_else(|| format!("Invalid filename: {:?}", path))?
+                .to_string();
+
             // 尝试加载账号
-            match self.load_single_account(&path).await {
+            match self.load_single_account(&account_id).await {
                 Ok(Some(token)) => {
-                    let account_id = token.account_id.clone();
-                    self.tokens.insert(account_id, token);
+                    let token_id = token.account_id.clone();
+                    self.tokens.insert(token_id, token);
                     count += 1;
                 }
                 Ok(None) => {
@@ -159,12 +164,8 @@ impl TokenManager {
 
     /// 重新加载指定账号（用于配额更新后的实时同步）
     pub async fn reload_account(&self, account_id: &str) -> Result<(), String> {
-        let path = self.safe_account_path(account_id)?;
-        if !path.exists() {
-            return Err(format!("账号文件不存在: {:?}", path));
-        }
-
-        match self.load_single_account(&path).await {
+        // Validation happens inside load_single_account via safe_account_path
+        match self.load_single_account(account_id).await {
             Ok(Some(token)) => {
                 self.tokens.insert(account_id.to_string(), token);
                 // [NEW] 重新加载账号时自动清除该账号的限流记录
@@ -184,20 +185,16 @@ impl TokenManager {
         Ok(count)
     }
 
-    /// 加载单个账号
-    /// Security: Validates path is within accounts directory to prevent path-injection
-    async fn load_single_account(&self, path: &PathBuf) -> Result<Option<ProxyToken>, String> {
-        // Validate path is within the accounts directory to prevent path-injection
-        // [Security Fix] Re-construct path from filename to ensure it is in the allowed directory
-        // instead of trusting the passed PathBuf which could theoretically be manipulated
-        let file_stem = path.file_stem()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| format!("Invalid account filename: {:?}", path))?;
+    /// 加载单个账号 (By ID, forcing safe path construction)
+    async fn load_single_account(&self, account_id: &str) -> Result<Option<ProxyToken>, String> {
+        // [Security] Always construct path safely from ID inside the function
+        let path = self.safe_account_path(account_id)?;
 
-        // Re-derive safe path (checks for traversal, null bytes, and correct dir)
-        let validated_path = self.safe_account_path(file_stem)?;
+        if !path.exists() {
+            return Err(format!("Account file not found: {:?}", path));
+        }
 
-        let content = std::fs::read_to_string(&validated_path)
+        let content = std::fs::read_to_string(&path)
             .map_err(|e| format!("读取文件失败: {}", e))?;
 
         let mut account: serde_json::Value = serde_json::from_str(&content)
@@ -566,7 +563,6 @@ impl TokenManager {
 
     /// 触发配额保护，限制特定模型 (Issue #621)
     /// 返回 true 如果发生了改变
-    /// Security: Validates account_path before file operations
     async fn trigger_quota_protection(
         &self,
         account_json: &mut serde_json::Value,
@@ -579,7 +575,6 @@ impl TokenManager {
         // Validate path to prevent path-injection
         // [Security Fix] Always reconstruct path from trusted account_id
         let account_path = self.safe_account_path(account_id)?;
-
         // 1. 初始化 protected_models 数组（如果不存在）
         if account_json.get("protected_models").is_none() {
             account_json["protected_models"] = serde_json::Value::Array(Vec::new());
@@ -613,7 +608,6 @@ impl TokenManager {
     }
 
     /// 检查并从账号级保护恢复（迁移至模型级，Issue #621）
-    /// Security: Validates account_path before file operations
     async fn check_and_restore_quota(
         &self,
         account_json: &mut serde_json::Value,
@@ -626,7 +620,6 @@ impl TokenManager {
         // We must rely on extracting ID from JSON or Filename.
         let account_id = account_json.get("id").and_then(|v| v.as_str()).ok_or("No ID in account JSON")?;
         let account_path = self.safe_account_path(account_id)?;
-
         // [兼容性] 如果该账号当前处于 proxy_disabled=true 且原因是 quota_protection，
         // 我们将其 proxy_disabled 设为 false，但同时更新其 protected_models 列表。
         tracing::info!(
@@ -665,7 +658,6 @@ impl TokenManager {
 
     /// 恢复特定模型的配额保护 (Issue #621)
     /// 返回 true 如果发生了改变
-    /// Security: Validates account_path before file operations
     async fn restore_quota_protection(
         &self,
         account_json: &mut serde_json::Value,
@@ -676,7 +668,6 @@ impl TokenManager {
         // Validate path to prevent path-injection
         // [Security Fix] Always reconstruct path from trusted account_id
         let account_path = self.safe_account_path(account_id)?;
-
         if let Some(arr) = account_json
             .get_mut("protected_models")
             .and_then(|v| v.as_array_mut())
@@ -1335,7 +1326,6 @@ impl TokenManager {
     }
 
     async fn disable_account(&self, account_id: &str, reason: &str) -> Result<(), String> {
-        // Use safe_account_path to prevent path-injection when constructing fallback path
         let path = if let Some(entry) = self.tokens.get(account_id) {
             entry.account_path.clone()
         } else {
@@ -2162,6 +2152,8 @@ mod tests {
             protected_models: HashSet::new(),
             health_score,
             reset_time,
+            validation_blocked: false,
+            validation_blocked_until: 0,
         }
     }
 

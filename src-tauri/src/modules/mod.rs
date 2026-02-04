@@ -21,6 +21,7 @@ pub mod http_api;
 pub mod cache;
 pub mod log_bridge;
 pub mod security_db;
+pub mod chat_db;
 
 use crate::models;
 

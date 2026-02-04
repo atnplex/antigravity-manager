@@ -111,7 +111,6 @@ jobs:
             libwebkit2gtk-4.0-dev \
             pkg-config \
             build-essential
-
       - name: Build Rust (for CodeQL)
         if: steps.rust-changes.outputs.changed == 'true'
         run: cargo build --manifest-path src-tauri/Cargo.toml

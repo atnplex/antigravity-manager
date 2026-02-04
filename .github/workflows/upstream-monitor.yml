@@ -12,6 +12,10 @@ permissions:
   contents: read
   issues: write
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   check-upstream:
     runs-on: ubuntu-latest
