@@ -61,6 +61,7 @@ impl TokenManager {
 
     /// Construct a safe account file path, validating the account_id to prevent path-injection.
     /// Returns an error if the account_id contains path traversal sequences or invalid characters.
+    /// [CI-Trigger] Force re-analysis after workflow fix.
     fn safe_account_path(&self, account_id: &str) -> Result<PathBuf, String> {
         // Structural Sanitization: Ensure account_id is a pure filename component
         let path_component = std::path::Path::new(account_id);

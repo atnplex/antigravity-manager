@@ -66,11 +66,8 @@ jobs:
     name: Analyze (Rust)
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    # Only run if Rust files were changed
-    if: |
-      github.event_name == 'pull_request' &&
-      contains(join(github.event.pull_request.labels.*.name, ','), 'rust') ||
-      github.event_name == 'push'
+    # Run on all relevant events (filtering handled by on.paths)
+    # if: removed to allow PRs without labels to trigger checks
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
