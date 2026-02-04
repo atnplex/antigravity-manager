@@ -104,7 +104,13 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libglib2.0-dev libgtk-3-dev libsoup2.4-dev libjavascriptcoregtk-4.0-dev libwebkit2gtk-4.0-dev
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libglib2.0-dev \
+            libappindicator3-dev \
+            libwebkit2gtk-4.0-dev \
+            pkg-config \
+            build-essential
 
       - name: Build Rust (for CodeQL)
         if: steps.rust-changes.outputs.changed == 'true'
