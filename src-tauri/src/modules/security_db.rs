@@ -70,8 +70,11 @@ pub fn get_security_db_path() -> Result<PathBuf, String> {
 
 /// 连接数据库
 fn connect_db() -> Result<Connection, String> {
-    let db_path = if let Ok(p) = std::env::var("TEST_SECURITY_DB_PATH") {
-        PathBuf::from(p)
+    // Only allow test database path override during test builds
+    let db_path = if cfg!(test) {
+        std::env::var("TEST_SECURITY_DB_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| get_security_db_path().unwrap())
     } else {
         get_security_db_path()?
     };
