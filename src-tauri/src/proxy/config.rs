@@ -36,6 +36,21 @@ impl Default for ZaiDispatchMode {
     }
 }
 
+/// User-Agent rotation mode for fingerprint protection
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum UaRotationMode {
+    /// No rotation - use static override or default
+    #[default]
+    Off,
+    /// Rotate per request (random selection)
+    PerRequest,
+    /// Same UA for same session (hash-based)
+    PerSession,
+    /// Same UA for same account (deterministic)
+    PerAccount,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ZaiModelDefaults {
     /// Default model for "opus" family (when the incoming model is a Claude id).
@@ -199,7 +214,7 @@ pub struct IpBlacklistConfig {
     /// 是否启用黑名单
     #[serde(default)]
     pub enabled: bool,
-    
+
     /// 自定义封禁消息
     #[serde(default = "default_block_message")]
     pub block_message: String,
@@ -224,7 +239,7 @@ pub struct IpWhitelistConfig {
     /// 是否启用白名单模式 (启用后只允许白名单IP访问)
     #[serde(default)]
     pub enabled: bool,
-    
+
     /// 白名单优先模式 (白名单IP跳过黑名单检查)
     #[serde(default = "default_true")]
     pub whitelist_priority: bool,
@@ -245,7 +260,7 @@ pub struct SecurityMonitorConfig {
     /// IP 黑名单配置
     #[serde(default)]
     pub blacklist: IpBlacklistConfig,
-    
+
     /// IP 白名单配置
     #[serde(default)]
     pub whitelist: IpWhitelistConfig,
@@ -285,7 +300,7 @@ pub struct ProxyConfig {
 
     /// API 密钥
     pub api_key: String,
-    
+
     /// Web UI 管理后台密码 (可选，如未设置则使用 api_key)
     pub admin_password: Option<String>,
 
@@ -341,6 +356,14 @@ pub struct ProxyConfig {
     /// Saved User-Agent string (persisted even when override is disabled)
     #[serde(default)]
     pub saved_user_agent: Option<String>,
+
+    /// User-Agent pool for rotation (fingerprint protection)
+    #[serde(default)]
+    pub user_agent_pool: Vec<String>,
+
+    /// User-Agent rotation mode
+    #[serde(default)]
+    pub ua_rotation_mode: UaRotationMode,
 }
 
 /// 上游代理配置
@@ -374,12 +397,32 @@ impl Default for ProxyConfig {
             preferred_account_id: None, // 默认使用轮询模式
             user_agent_override: None,
             saved_user_agent: None,
+            user_agent_pool: default_user_agent_pool(),
+            ua_rotation_mode: UaRotationMode::default(),
         }
     }
 }
 
 fn default_request_timeout() -> u64 {
     120 // 默认 120 秒,原来 60 秒太短
+}
+
+/// Default pool of User-Agent strings for rotation (fingerprint protection)
+fn default_user_agent_pool() -> Vec<String> {
+    vec![
+        // Chrome on Windows
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36".to_string(),
+        // Chrome on macOS
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36".to_string(),
+        // Firefox on Windows
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0".to_string(),
+        // Firefox on macOS
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:133.0) Gecko/20100101 Firefox/133.0".to_string(),
+        // Safari on macOS
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15".to_string(),
+        // Edge on Windows
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0".to_string(),
+    ]
 }
 
 fn default_zai_base_url() -> String {
