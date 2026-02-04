@@ -62,14 +62,19 @@ impl TokenManager {
     /// Construct a safe account file path, validating the account_id to prevent path-injection.
     /// Returns an error if the account_id contains path traversal sequences or invalid characters.
     fn safe_account_path(&self, account_id: &str) -> Result<PathBuf, String> {
-        // Reject path traversal attempts (check for '..' specifically)
-        if account_id.contains("..") {
-            return Err(format!("Invalid account_id: contains traversal components: {}", account_id));
+        // Structural Sanitization: Ensure account_id is a pure filename component
+        let path_component = std::path::Path::new(account_id);
+        let filename_str = path_component.file_name()
+            .and_then(|s| s.to_str())
+            .ok_or("Invalid account_id: could not extract filename")?;
+
+        if filename_str != account_id {
+             return Err(format!("Invalid account_id: contains path separators or special components: {}", account_id));
         }
 
         // Whitelist validation: allow only alphanumeric, -, _, ., @
         if !account_id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '@') {
-            return Err(format!("Invalid account_id: contains invalid characters (allowed: alphanumeric, -, _, ., @): {}", account_id));
+             return Err(format!("Invalid account_id: contains invalid characters (allowed: alphanumeric, -, _, ., @): {}", account_id));
         }
 
         // Check for empty
