@@ -66,11 +66,8 @@ jobs:
     name: Analyze (Rust)
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    # Only run if Rust files were changed
-    if: |
-      github.event_name == 'pull_request' &&
-      contains(join(github.event.pull_request.labels.*.name, ','), 'rust') ||
-      github.event_name == 'push'
+    # Run on all relevant events (filtering handled by on.paths)
+    # if: removed to allow PRs without labels to trigger checks
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -100,6 +97,17 @@ jobs:
         with:
           languages: rust
 
+      - name: Install system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libglib2.0-dev \
+            libappindicator3-dev \
+            libwebkit2gtk-4.0-dev \
+            pkg-config \
+            build-essential
       - name: Build Rust (for CodeQL)
         if: steps.rust-changes.outputs.changed == 'true'
         run: cargo build --manifest-path src-tauri/Cargo.toml
