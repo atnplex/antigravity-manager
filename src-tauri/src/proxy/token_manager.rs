@@ -288,7 +288,9 @@ impl TokenManager {
 
                 // Save cleared state (use validated_path to prevent path-injection)
                 if let Ok(json_str) = serde_json::to_string_pretty(&account) {
-                    let _ = std::fs::write(&validated_path, json_str);
+                    if let Err(e) = std::fs::write(&validated_path, json_str) {
+                         tracing::warn!("Failed to save cleared validation block for {:?}: {}", &validated_path, e);
+                    }
                 }
             }
         }
