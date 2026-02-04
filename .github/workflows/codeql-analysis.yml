@@ -1,0 +1,124 @@
+name: CodeQL Security Analysis
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1" # Weekly Monday 6am UTC
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      javascript: ${{ steps.filter.outputs.javascript }}
+      ruby: ${{ steps.filter.outputs.ruby }}
+      any-code: ${{ steps.filter.outputs.any-code }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            rust:
+              - '**/*.rs'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+            javascript:
+              - '**/*.js'
+              - '**/*.ts'
+              - '**/*.jsx'
+              - '**/*.tsx'
+              - 'package.json'
+            ruby:
+              - '**/*.rb'
+              - 'Gemfile'
+              - 'Gemfile.lock'
+            any-code:
+              - '**/*.rs'
+              - '**/*.js'
+              - '**/*.ts'
+              - '**/*.rb'
+              - '**/*.jsx'
+              - '**/*.tsx'
+
+  analyze-rust:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.rust == 'true' || github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: rust
+          queries: security-extended
+      - uses: github/codeql-action/autobuild@v3
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:rust
+
+  analyze-javascript:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.javascript == 'true' || github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+      - uses: github/codeql-action/autobuild@v3
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:javascript-typescript
+
+  analyze-ruby:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.ruby == 'true' || github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ruby
+          queries: security-extended
+      - uses: github/codeql-action/autobuild@v3
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:ruby
+
+  # Completion gate - used as the required status check
+  # Passes when all triggered analyses complete successfully
+  codeql-complete:
+    needs: [detect-changes, analyze-rust, analyze-javascript, analyze-ruby]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check analysis results
+        run: |
+          echo "Analysis jobs completed"
+          echo "Rust ran: ${{ needs.detect-changes.outputs.rust }}"
+          echo "JavaScript ran: ${{ needs.detect-changes.outputs.javascript }}"
+          echo "Ruby ran: ${{ needs.detect-changes.outputs.ruby }}"
+          
+          # Fail if any analysis job that ran actually failed
+          if [[ "${{ needs.analyze-rust.result }}" == "failure" ]]; then
+            echo "Rust analysis failed"
+            exit 1
+          fi
+          if [[ "${{ needs.analyze-javascript.result }}" == "failure" ]]; then
+            echo "JavaScript analysis failed"
+            exit 1
+          fi
+          if [[ "${{ needs.analyze-ruby.result }}" == "failure" ]]; then
+            echo "Ruby analysis failed"
+            exit 1
+          fi
+          
+          echo "All completed analyses passed!"
