@@ -257,6 +257,26 @@ export const ProxyMonitor: React.FC<ProxyMonitorProps> = ({ className }) => {
   const [loading, setLoading] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
+  // Refs to avoid stale closures in pollInterval
+  const currentPageRef = useRef(currentPage);
+  const filterRef = useRef(filter);
+  const accountFilterRef = useRef(accountFilter);
+  const loadingRef = useRef(loading);
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    currentPageRef.current = currentPage;
+  }, [currentPage]);
+  useEffect(() => {
+    filterRef.current = filter;
+  }, [filter]);
+  useEffect(() => {
+    accountFilterRef.current = accountFilter;
+  }, [accountFilter]);
+  useEffect(() => {
+    loadingRef.current = loading;
+  }, [loading]);
+
   const uniqueAccounts = useMemo(() => {
     const emailSet = new Set<string>();
     logs.forEach((log) => {
@@ -473,8 +493,12 @@ export const ProxyMonitor: React.FC<ProxyMonitorProps> = ({ className }) => {
         "[ProxyMonitor] Web mode detected, starting auto-poll (10s)",
       );
       pollInterval = window.setInterval(() => {
-        if (isMountedRef.current && !loading) {
-          loadData(currentPage, filter, accountFilter);
+        if (isMountedRef.current && !loadingRef.current) {
+          loadData(
+            currentPageRef.current,
+            filterRef.current,
+            accountFilterRef.current,
+          );
         }
       }, 10000);
     }
