@@ -61,7 +61,7 @@ pub async fn ip_filter_middleware(
 
         // 2. 检查黑名单
         if security_config.security_monitor.blacklist.enabled {
-            match security_db::check_and_update_blacklist_entry(ip) {
+            match security_db::get_blacklist_entry_for_ip(ip) {
                 Ok(Some(entry)) => {
                     tracing::warn!("[IP Filter] IP {} is in blacklist, blocking", ip);
                     
