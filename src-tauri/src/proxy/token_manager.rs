@@ -248,7 +248,7 @@ impl TokenManager {
 
         // 配额保护检查 - 只处理配额保护逻辑
         // 这样可以在加载时自动恢复配额已恢复的账号
-        if self.check_and_protect_quota(&mut account, path).await {
+        if self.check_and_protect_quota(&mut account, &path).await {
             tracing::debug!(
                 "Account skipped due to quota protection: {:?} (email={})",
                 path,
@@ -297,8 +297,8 @@ impl TokenManager {
 
                 // Save cleared state (use validated_path to prevent path-injection)
                 if let Ok(json_str) = serde_json::to_string_pretty(&account) {
-                    if let Err(e) = std::fs::write(&validated_path, json_str) {
-                         tracing::warn!("Failed to save cleared validation block for {:?}: {}", &validated_path, e);
+                    if let Err(e) = std::fs::write(&path, json_str) {
+                    tracing::warn!("Failed to save cleared validation block for {:?}: {}", &path, e);
                     }
                 }
             }

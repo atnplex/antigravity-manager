@@ -153,10 +153,11 @@ pub async fn load_skill_content(skill_ids: Vec<String>) -> Result<HashMap<String
         let content = std::fs::read_to_string(&skill.path)
             .map_err(|e| format!("Failed to read skill {}: {}", skill_id, e))?;
 
-        total_bytes += content.len();
+        let content_len = content.len();
+        total_bytes += content_len;
         contents.insert(skill_id.clone(), content);
 
-        debug!("  Loaded {} ({} bytes)", skill_id, content.len());
+        debug!("  Loaded {} ({} bytes)", skill_id, content_len);
     }
 
     info!("Loaded {} skills, {} bytes total", contents.len(), total_bytes);

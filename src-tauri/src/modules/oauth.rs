@@ -218,7 +218,7 @@ pub async fn ensure_fresh_token(
     }
 
     // Acquire per-account lock to prevent concurrent refresh attempts
-    let lock = get_refresh_lock(&current_token.email);
+    let lock = get_refresh_lock(current_token.email.as_deref().unwrap_or("unknown"));
     let _guard = lock.lock().await;
 
     // Re-check after acquiring lock (another request may have refreshed while we waited)
@@ -227,7 +227,7 @@ pub async fn ensure_fresh_token(
 
     crate::modules::logger::log_info(&format!(
         "Token expiring soon, refreshing for {}...",
-        &current_token.email
+        current_token.email.as_deref().unwrap_or("unknown")
     ));
     let response = refresh_access_token(&current_token.refresh_token).await?;
 

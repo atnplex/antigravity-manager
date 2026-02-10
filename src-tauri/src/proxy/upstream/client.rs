@@ -67,8 +67,9 @@ impl UpstreamClient {
         drop(pool_lock);
 
         let mut mode_lock = self.ua_rotation_mode.write().await;
+        let mode_for_log = mode.clone();
         *mode_lock = mode;
-        tracing::info!("UA rotation updated: mode={:?}, pool_size={}", mode, self.user_agent_pool.read().await.len());
+        tracing::info!("UA rotation updated: mode={:?}, pool_size={}", mode_for_log, self.user_agent_pool.read().await.len());
     }
 
     /// 设置动态 User-Agent 覆盖
@@ -102,7 +103,7 @@ impl UpstreamClient {
         let index = match mode {
             UaRotationMode::Off => 0,
             UaRotationMode::PerRequest => {
-                rand::rng().random_range(0..pool.len())
+                rand::thread_rng().gen_range(0..pool.len())
             }
             UaRotationMode::PerSession => {
                 let key = session_id.unwrap_or("default-session");
