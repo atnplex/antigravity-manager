@@ -274,7 +274,7 @@ mod tests {
         );
         assert_eq!(
             map_claude_model_to_gemini("claude-opus-4"),
-            "claude-opus-4-5-thinking"
+            "claude-opus-4-6-thinking"
         );
         // Test gemini pass-through (should not be caught by "mini" rule)
         assert_eq!(
