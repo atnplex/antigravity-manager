@@ -49,10 +49,18 @@ async fn auth_middleware_internal(
 
     // 过滤心跳和健康检查请求,避免日志噪音
     let is_health_check = path == "/healthz" || path == "/api/health" || path == "/health";
-    if !path.contains("event_logging") && !is_health_check {
-        tracing::info!("Request: {} {}", method, path);
+
+    // Redact query parameters for logging to prevent leaking sensitive info
+    let log_path = if let Some(idx) = path.find('?') {
+        format!("{}?...", &path[..idx])
     } else {
-        tracing::trace!("Heartbeat/Health: {} {}", method, path);
+        path.clone()
+    };
+
+    if !path.contains("event_logging") && !is_health_check {
+        tracing::info!("Request: {} {}", method, log_path);
+    } else {
+        tracing::trace!("Heartbeat/Health: {} {}", method, log_path);
     }
 
     // Allow CORS preflight regardless of auth policy.
@@ -85,7 +93,7 @@ async fn auth_middleware_internal(
             return Ok(next.run(request).await);
         }
     }
-    
+
     // 从 header 中提取 API key
     let api_key = request
         .headers()
@@ -160,7 +168,7 @@ mod tests {
             .uri("/admin/stats")
             .body(axum::body::Body::empty())
             .unwrap();
-        
+
         // 此测试由于涉及 Next 中间件调用比较复杂,主要验证核心逻辑
         // 我们在 auth_middleware_internal 基础上做了逻辑校验即可
     }
