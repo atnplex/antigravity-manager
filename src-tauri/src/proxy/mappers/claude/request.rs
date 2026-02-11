@@ -352,14 +352,16 @@ pub fn transform_claude_request_in(
     // [FIX #1747] If thinking is auto-enabled by model default (e.g. Opus) but no
     // ThinkingConfig was provided by the client, inject a default config with a budget
     // to prevent 'thinking requires a budget' errors from upstream APIs.
+    const DEFAULT_THINKING_BUDGET_TOKENS: u32 = 10000;
     if cleaned_req.thinking.is_none() && should_enable_thinking_by_default(&cleaned_req.model) {
         tracing::info!(
-            "[Thinking-Mode] Injecting default ThinkingConfig (budget=10000) for model: {}",
+            "[Thinking-Mode] Injecting default ThinkingConfig (budget={}) for model: {}",
+            DEFAULT_THINKING_BUDGET_TOKENS,
             cleaned_req.model
         );
         cleaned_req.thinking = Some(ThinkingConfig {
             type_: "enabled".to_string(),
-            budget_tokens: Some(10000),
+            budget_tokens: Some(DEFAULT_THINKING_BUDGET_TOKENS),
         });
     }
 
@@ -661,16 +663,18 @@ fn should_disable_thinking_due_to_history(messages: &[Message]) -> bool {
 
 /// Check if thinking mode should be enabled by default for a given model
 ///
-/// Claude Code v2.0.67+ enables thinking by default for Opus 4.5 models.
+/// Claude Code v2.0.67+ enables thinking by default for Opus models.
 /// This function determines if the model should have thinking enabled
 /// when no explicit thinking configuration is provided.
 fn should_enable_thinking_by_default(model: &str) -> bool {
     let model_lower = model.to_lowercase();
 
-    // Enable thinking by default for Opus 4.5 variants
-    if model_lower.contains("opus-4-5") || model_lower.contains("opus-4.5") {
+    // Enable thinking by default for Opus 4.5 and 4.6 variants
+    if model_lower.contains("opus-4-5") || model_lower.contains("opus-4.5")
+        || model_lower.contains("opus-4-6") || model_lower.contains("opus-4.6")
+    {
         tracing::debug!(
-            "[Thinking-Mode] Auto-enabling thinking for Opus 4.5 model: {}",
+            "[Thinking-Mode] Auto-enabling thinking for Opus model: {}",
             model
         );
         return true;
