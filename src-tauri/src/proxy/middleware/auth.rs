@@ -11,6 +11,14 @@ use tokio::sync::RwLock;
 
 use crate::proxy::{ProxyAuthMode, ProxySecurityConfig};
 
+/// Constant-time string comparison to prevent timing side-channel attacks.
+/// Uses the `subtle` crate which is hardened against compiler optimizations.
+/// Note: comparison is constant-time w.r.t. contents but not length.
+fn constant_time_eq(a: &str, b: &str) -> bool {
+    use subtle::ConstantTimeEq;
+    bool::from(a.as_bytes().ct_eq(b.as_bytes()))
+}
+
 /// API Key 认证中间件 (代理接口使用，遵循 auth_mode)
 pub async fn auth_middleware(
     state: State<Arc<RwLock<ProxySecurityConfig>>>,
@@ -111,16 +119,16 @@ async fn auth_middleware_internal(
         // 管理接口：优先使用独立的 admin_password，如果没有则回退使用 api_key
         match &security.admin_password {
             Some(pwd) if !pwd.is_empty() => {
-                api_key.map(|k| k == pwd).unwrap_or(false)
+                api_key.map(|k| constant_time_eq(k, pwd)).unwrap_or(false)
             }
             _ => {
                 // 回退使用 api_key
-                api_key.map(|k| k == security.api_key).unwrap_or(false)
+                api_key.map(|k| constant_time_eq(k, &security.api_key)).unwrap_or(false)
             }
         }
     } else {
         // AI 代理接口：仅允许使用 api_key
-        api_key.map(|k| k == security.api_key).unwrap_or(false)
+        api_key.map(|k| constant_time_eq(k, &security.api_key)).unwrap_or(false)
     };
 
     if authorized {
