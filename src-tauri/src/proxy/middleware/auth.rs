@@ -11,6 +11,20 @@ use tokio::sync::RwLock;
 
 use crate::proxy::{ProxyAuthMode, ProxySecurityConfig};
 
+/// Constant-time string comparison to prevent timing side-channel attacks.
+/// Returns true if both strings are equal, comparing all bytes regardless of early mismatch.
+fn constant_time_eq(a: &str, b: &str) -> bool {
+    let a_bytes = a.as_bytes();
+    let b_bytes = b.as_bytes();
+    if a_bytes.len() != b_bytes.len() {
+        // Still do a dummy comparison to avoid leaking length difference timing
+        let _ = a_bytes.iter().fold(0u8, |acc, &x| acc | x);
+        return false;
+    }
+    let result = a_bytes.iter().zip(b_bytes.iter()).fold(0u8, |acc, (&x, &y)| acc | (x ^ y));
+    result == 0
+}
+
 /// API Key 认证中间件 (代理接口使用，遵循 auth_mode)
 pub async fn auth_middleware(
     state: State<Arc<RwLock<ProxySecurityConfig>>>,
@@ -111,16 +125,16 @@ async fn auth_middleware_internal(
         // 管理接口：优先使用独立的 admin_password，如果没有则回退使用 api_key
         match &security.admin_password {
             Some(pwd) if !pwd.is_empty() => {
-                api_key.map(|k| k == pwd).unwrap_or(false)
+                api_key.map(|k| constant_time_eq(k, pwd)).unwrap_or(false)
             }
             _ => {
                 // 回退使用 api_key
-                api_key.map(|k| k == security.api_key).unwrap_or(false)
+                api_key.map(|k| constant_time_eq(k, &security.api_key)).unwrap_or(false)
             }
         }
     } else {
         // AI 代理接口：仅允许使用 api_key
-        api_key.map(|k| k == security.api_key).unwrap_or(false)
+        api_key.map(|k| constant_time_eq(k, &security.api_key)).unwrap_or(false)
     };
 
     if authorized {

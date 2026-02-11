@@ -299,7 +299,8 @@ function AddAccountDialog({ onAdd }: AddAccountDialogProps) {
 
             // 3. 监听消息
             const handleMessage = async (event: MessageEvent) => {
-                // 安全检查: 如果定义了 ORIGIN 校验更好，这里暂时检查 data type
+                // Security: validate origin to prevent cross-origin message injection
+                if (event.origin !== window.location.origin) return;
                 if (event.data?.type === 'oauth-success') {
                     popup.close();
                     window.removeEventListener('message', handleMessage);
