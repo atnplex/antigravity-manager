@@ -978,7 +978,7 @@ impl TokenManager {
                                 && bound_token.protected_models.contains(&normalized_target))
                         {
                             // 3. 账号可用且未被标记为尝试失败，优先复用
-                            tracing::debug!("Sticky Session: Successfully reusing bound account {} for session {}", bound_token.email, sid);
+                            tracing::debug!("Sticky Session: Successfully reusing bound account {} for session {:?}", bound_token.email, crate::utils::mask::mask_secret(sid));
                             target_token = Some(bound_token.clone());
                         } else if quota_protection_enabled
                             && bound_token.protected_models.contains(&normalized_target)
@@ -989,8 +989,8 @@ impl TokenManager {
                     } else {
                         // 绑定的账号已不存在（可能被删除），解绑
                         tracing::debug!(
-                            "Sticky Session: Bound account not found for session {}, unbinding",
-                            sid
+                            "Sticky Session: Bound account not found for session {:?}, unbinding",
+                            crate::utils::mask::mask_secret(sid)
                         );
                         self.session_accounts.remove(sid);
                     }

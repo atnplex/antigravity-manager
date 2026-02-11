@@ -200,6 +200,9 @@ pub async fn import_from_custom_db_path(path_str: String) -> Result<Account, Str
     if !path.exists() {
         return Err(format!("File does not exist: {:?}", path));
     }
+    if !path.is_file() {
+         return Err(format!("Path is not a regular file: {:?}", path));
+    }
 
     let refresh_token = extract_refresh_token_from_file(&path)?;
 
