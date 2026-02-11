@@ -12,17 +12,11 @@ use tokio::sync::RwLock;
 use crate::proxy::{ProxyAuthMode, ProxySecurityConfig};
 
 /// Constant-time string comparison to prevent timing side-channel attacks.
-/// Returns true if both strings are equal, comparing all bytes regardless of early mismatch.
+/// Uses the `subtle` crate which is hardened against compiler optimizations.
+/// Note: comparison is constant-time w.r.t. contents but not length.
 fn constant_time_eq(a: &str, b: &str) -> bool {
-    let a_bytes = a.as_bytes();
-    let b_bytes = b.as_bytes();
-    if a_bytes.len() != b_bytes.len() {
-        // Still do a dummy comparison to avoid leaking length difference timing
-        let _ = a_bytes.iter().fold(0u8, |acc, &x| acc | x);
-        return false;
-    }
-    let result = a_bytes.iter().zip(b_bytes.iter()).fold(0u8, |acc, (&x, &y)| acc | (x ^ y));
-    result == 0
+    use subtle::ConstantTimeEq;
+    bool::from(a.as_bytes().ct_eq(b.as_bytes()))
 }
 
 /// API Key 认证中间件 (代理接口使用，遵循 auth_mode)
