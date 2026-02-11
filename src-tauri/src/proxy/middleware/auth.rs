@@ -51,10 +51,16 @@ async fn auth_middleware_internal(
     let is_health_check = path == "/healthz" || path == "/api/health" || path == "/health";
 
     // Redact query parameters for logging to prevent leaking sensitive info
-    let log_path = if let Some(idx) = path.find('?') {
-        format!("{}?...", &path[..idx])
+    let full_path = request
+        .uri()
+        .path_and_query()
+        .map(|pq| pq.as_str())
+        .unwrap_or_else(|| request.uri().path());
+    let full_path = full_path.to_string();
+    let log_path = if let Some(idx) = full_path.find('?') {
+        format!("{}?...", &full_path[..idx])
     } else {
-        path.clone()
+        full_path.clone()
     };
 
     if !path.contains("event_logging") && !is_health_check {
