@@ -361,10 +361,14 @@ pub async fn handle_messages(
     }
 
     // Redact sensitive content from debug logs
+    // Redact sensitive content from debug logs
     let mut safe_request = request.clone();
     safe_request.messages.iter_mut().for_each(|m| {
         m.content = crate::proxy::mappers::claude::models::MessageContent::String("[REDACTED]".to_string());
     });
+    if safe_request.system.is_some() {
+        safe_request.system = Some(crate::proxy::mappers::claude::models::SystemPrompt::String("[REDACTED]".to_string()));
+    }
     debug!("[{}] Full Claude Request JSON (Redacted): {}", trace_id, serde_json::to_string_pretty(&safe_request).unwrap_or_default());
     debug!("========== [{}] CLAUDE REQUEST DEBUG END ==========", trace_id);
 
